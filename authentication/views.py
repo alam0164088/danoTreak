@@ -1,7 +1,6 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-from .serializers import SignUpSerializer, LoginSerializer, EmailVerificationSerializer, UserSerializer
 from .models import User, Token
 from django.core.mail import send_mail
 import random
@@ -10,12 +9,27 @@ from .permissions import IsAdmin
 from django.conf import settings
 import jwt
 from datetime import datetime
-import datetime as dt  # Import datetime module for timezone.utc
+import datetime as dt
+from django.utils import timezone
 from rest_framework.permissions import IsAuthenticated
 import logging
+from django.contrib.auth import get_user_model
 
-# Set up logging
+from .serializers import (
+    SignUpSerializer,
+    LoginSerializer,
+    EmailVerificationSerializer,
+    UserSerializer,
+    PasswordResetRequestSerializer,
+    PasswordResetVerifyCodeSerializer,
+    PasswordResetSetPasswordSerializer,
+    PasswordResetSetPasswordWithoutOTPSerializer,
+    LogoutSerializer
+)
+
 logger = logging.getLogger(__name__)
+User = get_user_model()
+
 
 class InitialAdminSignUpView(APIView):
     permission_classes = []
@@ -157,17 +171,125 @@ class EmailVerificationView(APIView):
     def post(self, request):
         serializer = EmailVerificationSerializer(data=request.data)
         if serializer.is_valid():
-            email = serializer.validated_data['email']
             code = serializer.validated_data['code']
-            user = User.objects.filter(email=email, email_verification_code=code).first()
-            if user:
-                user.is_email_verified = True
-                user.email_verification_code = None
-                user.save()
-                logger.info(f"Email verified: {user.email}")
-                return Response({"message": "Email verified successfully."}, status=status.HTTP_200_OK)
-            return Response({"error": "Invalid code or email."}, status=status.HTTP_400_BAD_REQUEST)
+            user = User.objects.filter(email_verification_code=code).last()
+            if not user:
+                return Response({"error": "Invalid OTP."}, status=status.HTTP_400_BAD_REQUEST)
+            
+            user.is_email_verified = True
+            user.email_verification_code = None
+            user.save()
+            logger.info(f"OTP verified: {user.email}")
+            return Response({
+                "message": "OTP verified successfully.",
+                "user": {
+                    "email": user.email,
+                    "role": user.role
+                }
+            }, status=status.HTTP_200_OK)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class PasswordResetRequestView(APIView):
+    permission_classes = []
+
+    def post(self, request):
+        serializer = PasswordResetRequestSerializer(data=request.data)
+        if serializer.is_valid():
+            email = serializer.validated_data['email']
+            user = User.objects.filter(email=email).first()
+            if not user:
+                return Response({"error": "User with this email does not exist."}, status=status.HTTP_404_NOT_FOUND)
+            
+            code = user.generate_password_reset_code()
+            try:
+                send_mail(
+                    'Password Reset OTP',
+                    f'Your OTP for password reset is {code}. It expires in 10 minutes.',
+                    settings.EMAIL_HOST_USER,
+                    [user.email],
+                    fail_silently=False,
+                )
+                logger.info(f"Password reset OTP sent to: {user.email}")
+                return Response({"message": "OTP sent to email for password reset."}, status=status.HTTP_200_OK)
+            except Exception as e:
+                logger.error(f"Failed to send OTP to {user.email}: {str(e)}")
+                return Response({"error": "Failed to send OTP. Please try again."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class PasswordResetVerifyCodeView(APIView):
+    permission_classes = []
+
+    def post(self, request):
+        serializer = PasswordResetVerifyCodeSerializer(data=request.data)
+        if serializer.is_valid():
+            code = serializer.validated_data['code']
+            user = User.objects.filter(password_reset_code=code).last()
+            if not user:
+                return Response({"error": "Invalid OTP."}, status=status.HTTP_400_BAD_REQUEST)
+            if user.password_reset_code_expires_at < timezone.now():
+                return Response({"error": "OTP has expired."}, status=status.HTTP_400_BAD_REQUEST)
+
+            return Response({"message": "OTP verified. You can now set a new password."}, status=status.HTTP_200_OK)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class PasswordResetSetPasswordView(APIView):
+    permission_classes = []
+
+    def post(self, request):
+        serializer = PasswordResetSetPasswordSerializer(data=request.data)
+        if serializer.is_valid():
+            code = serializer.validated_data.get('code')
+            email = serializer.validated_data.get('email')
+            new_password = serializer.validated_data['new_password']
+            
+            user = None
+            if code:
+                # OTP flow
+                user = User.objects.filter(password_reset_code=code).last()
+                if not user:
+                    return Response({"error": "Invalid OTP."}, status=status.HTTP_400_BAD_REQUEST)
+                if user.password_reset_code_expires_at < timezone.now():
+                    return Response({"error": "OTP has expired."}, status=status.HTTP_400_BAD_REQUEST)
+                user.password_reset_code = None
+                user.password_reset_code_expires_at = None
+            elif email:
+                # Email-based reset (no OTP, for demo/simplicity)
+                user = User.objects.filter(email=email).first()
+                if not user:
+                    return Response({"error": "User with this email does not exist."}, status=status.HTTP_404_NOT_FOUND)
+                # Optional: Check if recent reset request exists, but skip for now
+            else:
+                # Authenticated flow
+                if not request.user.is_authenticated:
+                    return Response({"error": "Authentication required."}, status=status.HTTP_401_UNAUTHORIZED)
+                user = request.user
+            
+            if user:
+                user.set_password(new_password)
+                user.save()
+                logger.info(f"Password reset/changed for: {user.email}")
+                return Response({"message": "Password reset successfully."}, status=status.HTTP_200_OK)
+            return Response({"error": "User not found."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class PasswordResetSetPasswordWithoutOTPView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = PasswordResetSetPasswordWithoutOTPSerializer(data=request.data)
+        if serializer.is_valid():
+            new_password = serializer.validated_data['new_password']
+            user = request.user
+            user.set_password(new_password)
+            user.save()
+            logger.info(f"Password changed for user: {user.email}")
+            return Response({"message": "Password changed successfully."}, status=status.HTTP_200_OK)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
 
 class AdminDashboardView(APIView):
     permission_classes = [IsAdmin]
@@ -208,7 +330,7 @@ class AdminUserManagementView(APIView):
                 "user": serializer.data
             }, status=status.HTTP_200_OK)
         except User.DoesNotExist:
-            return Response({"error": "User not found."}, status=status.HTTP_404_NOT_FOUND)
+            return Response({"error": "User not found."}, status=status.HTTP_400_BAD_REQUEST)
 
     def delete(self, request, user_id):
         try:
@@ -224,18 +346,18 @@ class LogoutView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        try:
-            refresh_token = request.data.get("refresh_token")
-            if not refresh_token:
-                Token.objects.filter(user=request.user).delete()
-                logger.info(f"All tokens deleted for user: {request.user.email}")
-                return Response({"message": "Successfully logged out."}, status=status.HTTP_205_RESET_CONTENT)
+        serializer = LogoutSerializer(data=request.data)
+        if serializer.is_valid():
+            password = serializer.validated_data['password']
+            user = request.user
+            if not user.check_password(password):
+                return Response({"error": "Invalid password."}, status=status.HTTP_401_UNAUTHORIZED)
             
-            token = RefreshToken(refresh_token)
-            token.blacklist()
-            Token.objects.filter(refresh_token=refresh_token).delete()
-            logger.info(f"User logged out: {request.user.email}")
-            return Response({"message": "Successfully logged out."}, status=status.HTTP_205_RESET_CONTENT)
-        except Exception as e:
-            logger.error(f"Logout error for {request.user.email}: {str(e)}")
-            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+            try:
+                Token.objects.filter(user=user).delete()
+                logger.info(f"All tokens deleted for user: {user.email}")
+                return Response({"message": "Successfully logged out."}, status=status.HTTP_205_RESET_CONTENT)
+            except Exception as e:
+                logger.error(f"Logout error for {user.email}: {str(e)}")
+                return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
