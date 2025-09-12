@@ -18,6 +18,7 @@ from django.contrib import admin
 from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
+from tts_app.views import home  # Import the home view
 
 
 urlpatterns = [
@@ -25,6 +26,7 @@ urlpatterns = [
     path('api/auth/', include('authentication.urls')),
     path('api/payment/', include('payment.urls')),
     path('tts/', include('tts_app.urls')),
+    path('', home), 
 ]
 
 if settings.DEBUG:

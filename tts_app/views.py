@@ -8,6 +8,8 @@ import requests
 import os
 import uuid
 from django.conf import settings
+    
+from django.http import HttpResponse
 
 @method_decorator(csrf_exempt, name='dispatch')
 class TranslateAndTTSAPIView(APIView):
@@ -60,3 +62,8 @@ class TranslateAndTTSAPIView(APIView):
             "translated_text": translated_text,
             "audio_url": audio_url
         })
+
+
+def home(request):
+    return HttpResponse("Welcome to Help Me Speak")
+
