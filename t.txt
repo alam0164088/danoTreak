@@ -1,17 +1,22 @@
 helpmespeak/
 ├── myproject/
 │   ├── __init__.py
-│   ├── settings.py          # Django সেটিংস (JWT, ইমেল, অ্যাপ কনফিগারেশন)
-│   ├── urls.py             # প্রজেক্ট-লেভেল URL রাউটিং
+│   ├── settings.py          # Django সেটিংস (JWT, ইমেল, অ্যাপ কনফিগারেশন, MEDIA)
+│   ├── urls.py              # প্রজেক্ট-লেভেল URL রাউটিং (authentication + tts_app)
 │   ├── wsgi.py
 ├── authentication/
 │   ├── __init__.py
 │   ├── migrations/
-│   │   ├── 0001_initial.py # ডাটাবেস মাইগ্রেশন ফাইল
-│   ├── models.py           # User Profile মডেল (ইমেল ভেরিফিকেশনের জন্য)
-│   ├── serializers.py      # API সিরিয়ালাইজার (সাইন আপ, লগইন, ভেরিফিকেশন)
-│   ├── views.py           # API ভিউ (সাইন আপ, লগইন, ড্যাশবোর্ড)
-│   ├── urls.py            # অ্যাপ-লেভেল URL রাউটিং
-│   ├── permissions.py      # কাস্টম পারমিশন (এডমিন/ইউজার রোল চেক)
-├── manage.py               # Django প্রজেক্ট ম্যানেজমেন্ট
-├── requirements.txt
+│   │   ├── 0001_initial.py  # ডাটাবেস মাইগ্রেশন ফাইল
+│   ├── models.py            # User Profile মডেল (ইমেল ভেরিফিকেশনের জন্য)
+│   ├── serializers.py       # API সিরিয়ালাইজার (সাইন আপ, লগইন, ভেরিফিকেশন)
+│   ├── views.py             # API ভিউ (সাইন আপ, লগইন, ড্যাশবোর্ড)
+│   ├── urls.py              # অ্যাপ-লেভেল URL রাউটিং
+│   ├── permissions.py       # কাস্টম পারমিশন (এডমিন/ইউজার রোল চেক)
+├── tts_app/
+│   ├── __init__.py
+│   ├── views.py             # Translate + TTS API
+│   ├── urls.py              # tts_app এর URL রাউট
+│   ├── utils.py             # gTTS helper functions (optional)
+├── manage.py                # Django প্রজেক্ট ম্যানেজমেন্ট
+├── requirements.txt         # প্রয়োজনীয় প্যাকেজ
