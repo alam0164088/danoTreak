@@ -1,6 +1,7 @@
 from django.contrib import admin
-from .models import User, Token, PasswordResetSession
+from .models import User, Token, PasswordResetSession, SubscriptionPlan
 
+# Your admin classes for each model
 @admin.register(User)
 class UserAdmin(admin.ModelAdmin):
     list_display = ('email', 'username', 'role', 'is_email_verified')
@@ -19,3 +20,9 @@ class PasswordResetSessionAdmin(admin.ModelAdmin):
     search_fields = ('user__email',)
     list_filter = ('created_at',)
     ordering = ('-created_at',)
+
+@admin.register(SubscriptionPlan)
+class SubscriptionPlanAdmin(admin.ModelAdmin):
+    list_display = ('name', 'price')
+    search_fields = ('name',)
+    ordering = ('name',)

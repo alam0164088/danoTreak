@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import User
+from .models import User,SubscriptionPlan
 import re
 
 class SignUpSerializer(serializers.ModelSerializer):
@@ -48,6 +48,7 @@ class PasswordResetVerifyCodeSerializer(serializers.Serializer):
 
 
 class PasswordResetSetPasswordSerializer(serializers.Serializer):
+    email = serializers.EmailField(required=False)  # যোগ করুন
     code = serializers.CharField(max_length=6, min_length=6, required=False)
     new_password = serializers.CharField(write_only=True, min_length=8)
     confirm_password = serializers.CharField(write_only=True, min_length=8)
@@ -59,6 +60,9 @@ class PasswordResetSetPasswordSerializer(serializers.Serializer):
             raise serializers.ValidationError({
                 "password": "Password must be at least 8 characters long and contain both letters and numbers."
             })
+        # Ensure either code or email is provided
+        if not data.get('code') and not data.get('email'):
+            raise serializers.ValidationError({"error": "Either code or email is required."})
         return data
 
 
@@ -84,3 +88,14 @@ class PasswordResetSetPasswordWithoutOTPSerializer(serializers.Serializer):
 
 class LogoutSerializer(serializers.Serializer):
     password = serializers.CharField(write_only=True)
+
+
+# authentication/serializers.py
+
+
+
+
+class SubscriptionPlanSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SubscriptionPlan
+        fields = ['id', 'name', 'price']
