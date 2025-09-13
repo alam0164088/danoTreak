@@ -222,18 +222,17 @@ class PasswordResetVerifyCodeView(APIView):
     permission_classes = []
 
     def post(self, request):
-        serializer = PasswordResetVerifyCodeSerializer(data=request.data)
-        if serializer.is_valid():
-            code = serializer.validated_data['code']
-            user = User.objects.filter(password_reset_code=code).last()
-            if not user:
-                return Response({"error": "Invalid OTP."}, status=status.HTTP_400_BAD_REQUEST)
-            if user.password_reset_code_expires_at < timezone.now():
-                return Response({"error": "OTP has expired."}, status=status.HTTP_400_BAD_REQUEST)
+        code = request.data.get('code')
+        if not code:
+            return Response({"error": "Code is required."}, status=status.HTTP_400_BAD_REQUEST)
 
-            return Response({"message": "OTP verified. You can now set a new password."}, status=status.HTTP_200_OK)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        user = User.objects.filter(password_reset_code=code).last()
+        if not user:
+            return Response({"error": "Invalid OTP."}, status=status.HTTP_400_BAD_REQUEST)
+        if user.password_reset_code_expires_at < timezone.now():
+            return Response({"error": "OTP has expired."}, status=status.HTTP_400_BAD_REQUEST)
 
+        return Response({"message": "OTP verified. You can now set a new password."}, status=status.HTTP_200_OK)
 
 class PasswordResetSetPasswordView(APIView):
     permission_classes = []

@@ -11,7 +11,8 @@ from .views import (
     LogoutView,
     PasswordResetRequestView,
     PasswordResetVerifyCodeView,
-    PasswordResetSetPasswordView
+    PasswordResetSetPasswordView,
+    PasswordResetSetPasswordWithoutOTPView
 )
 
 urlpatterns = [
@@ -21,5 +22,6 @@ urlpatterns = [
     path('logout/', LogoutView.as_view(), name='logout'),
     path('password-reset/request/', PasswordResetRequestView.as_view(), name='password-reset-request'),
     path('password-reset/verify-code/', PasswordResetVerifyCodeView.as_view(), name='verify-reset-code'),
+    path('password-reset/set-password/', PasswordResetSetPasswordWithoutOTPView.as_view(), name='password-reset-set-password'),
     
 ]
