@@ -13,24 +13,27 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Load environment variables
 # ------------------------------
 env = environ.Env(
-    DEBUG=(bool, False),  # Type casting for DEBUG
-    ALLOWED_HOSTS=(list, ["*"]),  # Type casting for ALLOWED_HOSTS
-    EMAIL_PORT=(int, 587),  # Type casting for EMAIL_PORT
-    EMAIL_USE_TLS=(bool, True)  # Type casting for EMAIL_USE_TLS
+    DEBUG=(bool, False),
+    ALLOWED_HOSTS=(list, ["*"]),
+    EMAIL_PORT=(int, 587),
+    EMAIL_USE_TLS=(bool, True)
 )
-env_file = os.path.join(BASE_DIR, ".env")
-print(f"Looking for .env file at: {env_file}")  # Debug
-if os.path.exists(env_file):
-    print(f".env file found. Contents:\n{open(env_file).read()}")  # Debug
-    environ.Env.read_env(env_file)  # Correct: Use class method
-else:
-    raise Exception(f".env file not found at {env_file}")
 
+# Conditional load of .env file (optional for local)
+env_file = os.path.join(BASE_DIR, ".env")
+if os.path.exists(env_file):
+    print(f".env file found at {env_file}, loading it...")
+    environ.Env.read_env(env_file)
+else:
+    print(".env file not found, using system environment variables")
+
+# ------------------------------
+# Core settings
+# ------------------------------
 SECRET_KEY = env("SECRET_KEY")
-print(f"SECRET_KEY loaded: {SECRET_KEY}")  # Debug
 DEBUG = env.bool("DEBUG", default=False)
 ALLOWED_HOSTS = env.list("ALLOWED_HOSTS", default=["*"])
-GOOGLE_API_KEY = env("GOOGLE_API_KEY")
+GOOGLE_API_KEY = env("GOOGLE_API_KEY", default="")
 
 # ------------------------------
 # Installed apps
@@ -53,7 +56,7 @@ INSTALLED_APPS = [
 # ------------------------------
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
-    "whitenoise.middleware.WhiteNoiseMiddleware",  # Static files
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -122,18 +125,18 @@ SIMPLE_JWT = {
 # ------------------------------
 # Email configuration
 # ------------------------------
-EMAIL_BACKEND = env("EMAIL_BACKEND")
-EMAIL_HOST = env("EMAIL_HOST")
-EMAIL_PORT = env.int("EMAIL_PORT")
-EMAIL_USE_TLS = env.bool("EMAIL_USE_TLS")
-EMAIL_HOST_USER = env("EMAIL_HOST_USER")
-EMAIL_HOST_PASSWORD = env("EMAIL_HOST_PASSWORD")
+EMAIL_BACKEND = env("EMAIL_BACKEND", default="django.core.mail.backends.smtp.EmailBackend")
+EMAIL_HOST = env("EMAIL_HOST", default="smtp.gmail.com")
+EMAIL_PORT = env.int("EMAIL_PORT", default=587)
+EMAIL_USE_TLS = env.bool("EMAIL_USE_TLS", default=True)
+EMAIL_HOST_USER = env("EMAIL_HOST_USER", default="")
+EMAIL_HOST_PASSWORD = env("EMAIL_HOST_PASSWORD", default="")
 
 # ------------------------------
 # Static & Media
 # ------------------------------
 STATIC_URL = "/static/"
-STATIC_ROOT = str(BASE_DIR / "staticfiles")
+STATIC_ROOT = BASE_DIR / "staticfiles"
 STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 
 MEDIA_URL = "/media/"
