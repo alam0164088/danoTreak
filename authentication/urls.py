@@ -14,6 +14,7 @@ from .views import (
     PasswordResetSetPasswordView,
     PasswordResetSetPasswordWithoutOTPView,
     ResendOTPView,
+    ProfileView,
 )
 
 urlpatterns = [
@@ -25,5 +26,6 @@ urlpatterns = [
     path('password-reset/request/', PasswordResetRequestView.as_view(), name='password-reset-request'),
     path('password-reset/verify-code/', PasswordResetVerifyCodeView.as_view(), name='verify-reset-code'),
     path('password-reset/set-password/', PasswordResetSetPasswordWithoutOTPView.as_view(), name='password-reset-set-password'),
+    path('profile/', ProfileView.as_view(), name='profile'),
     
 ]

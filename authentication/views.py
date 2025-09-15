@@ -13,7 +13,7 @@ import logging
 from datetime import datetime
 import datetime as dt
 
-from .models import Token
+from .models import Token, Profile
 from .permissions import IsAdmin
 from .serializers import (
     SignUpSerializer,
@@ -24,13 +24,13 @@ from .serializers import (
     PasswordResetVerifyCodeSerializer,
     PasswordResetSetPasswordSerializer,
     PasswordResetSetPasswordWithoutOTPSerializer,
-    LogoutSerializer
+    LogoutSerializer,
+    ProfileSerializer
 )
 
 logger = logging.getLogger(__name__)
 User = get_user_model()
 
-# -------------------- Initial Admin SignUp -------------------- #
 class InitialAdminSignUpView(APIView):
     permission_classes = [AllowAny]
 
@@ -45,12 +45,10 @@ class InitialAdminSignUpView(APIView):
             user.is_email_verified = True
             user.save()
             
-            # Generate tokens
             refresh = RefreshToken.for_user(user)
             refresh_token = str(refresh)
             access_token = str(refresh.access_token)
             
-            # Decode to get expiry
             refresh_payload = jwt.decode(refresh_token, settings.SECRET_KEY, algorithms=["HS256"])
             access_payload = jwt.decode(access_token, settings.SECRET_KEY, algorithms=["HS256"])
             refresh_expires_at = datetime.fromtimestamp(refresh_payload['exp'], tz=dt.timezone.utc)
@@ -86,7 +84,6 @@ class InitialAdminSignUpView(APIView):
             }, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-# -------------------- User SignUp -------------------- #
 class SignUpView(APIView):
     permission_classes = [AllowAny]
 
@@ -98,7 +95,6 @@ class SignUpView(APIView):
             user.email_verification_code = code
             user.save()
             
-            # Generate tokens
             refresh = RefreshToken.for_user(user)
             refresh_token = str(refresh)
             access_token = str(refresh.access_token)
@@ -135,7 +131,6 @@ class SignUpView(APIView):
             }, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-# -------------------- Admin SignUp -------------------- #
 class AdminSignUpView(APIView):
     permission_classes = [IsAdmin]
 
@@ -158,7 +153,6 @@ class AdminSignUpView(APIView):
             return Response({"message": "Admin created. Verification code sent to email.", "email": user.email}, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-# -------------------- Resend OTP -------------------- #
 class ResendOTPView(APIView):
     permission_classes = [AllowAny]
 
@@ -192,7 +186,6 @@ class ResendOTPView(APIView):
             logger.error(f"Failed to resend OTP to {user.email}: {str(e)}")
             return Response({"error": "Failed to send OTP. Please try again."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-# -------------------- Login -------------------- #
 class LoginView(APIView):
     permission_classes = [AllowAny]
 
@@ -234,7 +227,6 @@ class LoginView(APIView):
             return Response({"error": "Invalid credentials."}, status=status.HTTP_401_UNAUTHORIZED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-# -------------------- Email Verification -------------------- #
 class EmailVerificationView(APIView):
     permission_classes = [AllowAny]
 
@@ -258,7 +250,6 @@ class EmailVerificationView(APIView):
             "user": {"email": user.email, "role": user.role}
         }, status=status.HTTP_200_OK)
 
-# -------------------- Password Reset Request -------------------- #
 class PasswordResetRequestView(APIView):
     permission_classes = [AllowAny]
 
@@ -282,7 +273,6 @@ class PasswordResetRequestView(APIView):
             return Response({"message": "OTP sent to email for password reset.", "email": user.email}, status=status.HTTP_200_OK)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-# -------------------- Password Reset Verify -------------------- #
 class PasswordResetVerifyCodeView(APIView):
     permission_classes = [AllowAny]
 
@@ -301,7 +291,6 @@ class PasswordResetVerifyCodeView(APIView):
 
         return Response({"message": "OTP verified. You can now set a new password.", "email": user.email}, status=status.HTTP_200_OK)
 
-# -------------------- Password Reset Set -------------------- #
 class PasswordResetSetPasswordView(APIView):
     permission_classes = [AllowAny]
 
@@ -336,7 +325,6 @@ class PasswordResetSetPasswordView(APIView):
             return Response({"message": "Password reset successfully."}, status=status.HTTP_200_OK)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-# -------------------- Password Change Without OTP -------------------- #
 class PasswordResetSetPasswordWithoutOTPView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -351,7 +339,6 @@ class PasswordResetSetPasswordWithoutOTPView(APIView):
             return Response({"message": "Password changed successfully."}, status=status.HTTP_200_OK)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-# -------------------- Admin Dashboard -------------------- #
 class AdminDashboardView(APIView):
     permission_classes = [IsAdmin]
 
@@ -361,7 +348,6 @@ class AdminDashboardView(APIView):
         logger.info(f"Admin dashboard accessed by: {request.user.email}")
         return Response({"message": "Welcome to Admin Dashboard", "users": serializer.data}, status=status.HTTP_200_OK)
 
-# -------------------- Admin User Management -------------------- #
 class AdminUserManagementView(APIView):
     permission_classes = [IsAdmin]
 
@@ -398,7 +384,6 @@ class AdminUserManagementView(APIView):
         except User.DoesNotExist:
             return Response({"error": "User not found."}, status=status.HTTP_404_NOT_FOUND)
 
-# -------------------- Logout -------------------- #
 class LogoutView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -413,4 +398,22 @@ class LogoutView(APIView):
             Token.objects.filter(user=user).delete()
             logger.info(f"All tokens deleted for user: {user.email}")
             return Response({"message": "Successfully logged out."}, status=status.HTTP_205_RESET_CONTENT)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+class ProfileView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        profile, created = Profile.objects.get_or_create(user=request.user)
+        serializer = ProfileSerializer(profile)
+        logger.info(f"Profile viewed by: {request.user.email}")
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    def put(self, request):
+        profile, created = Profile.objects.get_or_create(user=request.user)
+        serializer = ProfileSerializer(profile, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            logger.info(f"Profile updated for user: {request.user.email}")
+            return Response(serializer.data, status=status.HTTP_200_OK)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
