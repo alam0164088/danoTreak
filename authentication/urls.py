@@ -12,11 +12,13 @@ from .views import (
     PasswordResetRequestView,
     PasswordResetVerifyCodeView,
     PasswordResetSetPasswordView,
-    PasswordResetSetPasswordWithoutOTPView
+    PasswordResetSetPasswordWithoutOTPView,
+    ResendOTPView,
 )
 
 urlpatterns = [
     path('signup/', SignUpView.as_view(), name='signup'),
+    path('resend-otp/', ResendOTPView.as_view(), name='resend-otp'),
     path('login/', LoginView.as_view(), name='login'),
     path('verify-email/', EmailVerificationView.as_view(), name='verify-email'),
     path('logout/', LogoutView.as_view(), name='logout'),

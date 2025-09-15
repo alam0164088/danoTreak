@@ -154,6 +154,39 @@ class AdminSignUpView(APIView):
             return Response({"message": "Admin created. Verification code sent to email."}, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+class ResendOTPView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        email = request.data.get('email')
+        if not email:
+            return Response({"error": "Email is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        user = User.objects.filter(email=email).first()
+        if not user:
+            return Response({"error": "User with this email does not exist."}, status=status.HTTP_404_NOT_FOUND)
+        
+        if user.is_email_verified:
+            return Response({"error": "Email is already verified."}, status=status.HTTP_400_BAD_REQUEST)
+        
+        code = str(random.randint(100000, 999999))
+        user.email_verification_code = code
+        user.save()
+        
+        try:
+            send_mail(
+                'Verify Your Email',
+                f'Your new verification code is {code}',
+                settings.EMAIL_HOST_USER,
+                [user.email],
+                fail_silently=False,
+            )
+            logger.info(f"Resend OTP sent to: {user.email}")
+            return Response({"message": "New OTP sent to email."}, status=status.HTTP_200_OK)
+        except Exception as e:
+            logger.error(f"Failed to resend OTP to {user.email}: {str(e)}")
+            return Response({"error": "Failed to send OTP. Please try again."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 class LoginView(APIView):
     permission_classes = [AllowAny]
 
