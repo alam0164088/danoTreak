@@ -11,7 +11,7 @@ import jwt
 from datetime import datetime
 import datetime as dt
 from django.utils import timezone
-from rest_framework.permissions import IsAuthenticated, AllowAny  # Ensure AllowAny is imported
+from rest_framework.permissions import IsAuthenticated, AllowAny
 import logging
 from django.contrib.auth import get_user_model
 
@@ -92,6 +92,30 @@ class SignUpView(APIView):
             code = str(random.randint(100000, 999999))
             user.email_verification_code = code
             user.save()
+            
+            # Generate tokens
+            refresh = RefreshToken.for_user(user)
+            refresh_token = str(refresh)
+            access_token = str(refresh.access_token)
+            
+            # Decode tokens to get expiration times
+            refresh_payload = jwt.decode(refresh_token, settings.SECRET_KEY, algorithms=["HS256"])
+            access_payload = jwt.decode(access_token, settings.SECRET_KEY, algorithms=["HS256"])
+            
+            refresh_expires_at = datetime.fromtimestamp(refresh_payload['exp'], tz=dt.timezone.utc)
+            access_expires_at = datetime.fromtimestamp(access_payload['exp'], tz=dt.timezone.utc)
+            
+            # Save tokens to Token model
+            Token.objects.create(
+                user=user,
+                email=user.email,
+                refresh_token=refresh_token,
+                access_token=access_token,
+                refresh_token_expires_at=refresh_expires_at,
+                access_token_expires_at=access_expires_at
+            )
+            
+            # Send OTP email
             send_mail(
                 'Verify Your Email',
                 f'Your verification code is {code}',
@@ -100,7 +124,12 @@ class SignUpView(APIView):
                 fail_silently=False,
             )
             logger.info(f"User signed up: {user.email}")
-            return Response({"message": "User created. Verification code sent to email."}, status=status.HTTP_201_CREATED)
+            return Response({
+                "message": "User created. Verification code sent to email.",
+                "refresh": refresh_token,
+                "access": access_token,
+                "role": user.role
+            }, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 class AdminSignUpView(APIView):

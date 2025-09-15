@@ -45,21 +45,20 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "corsheaders",   # ✅ Added
     "rest_framework",
     "authentication",
     "payment",
     "tts_app",
     "bot",
     "rest_framework_simplejwt",
-
-
-
 ]
 
 # ------------------------------
 # Middleware
 # ------------------------------
 MIDDLEWARE = [
+    "corsheaders.middleware.CorsMiddleware",  # ✅ Added (must be on top)
     "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
@@ -156,3 +155,8 @@ USE_I18N = True
 USE_TZ = True
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+# ------------------------------
+# CORS Settings
+# ------------------------------
+CORS_ALLOW_ALL_ORIGINS = True   # ✅ Allow all origins (development use)
