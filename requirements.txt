@@ -16,4 +16,6 @@ urllib3==2.5.0
 dj-database-url==1.2.0
 gunicorn==23.0.0
 whitenoise==6.5.0
+django-cors-headers==4.6.0
+
 
