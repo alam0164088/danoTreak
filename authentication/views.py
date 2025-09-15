@@ -1,20 +1,20 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-from .models import User, Token
 from django.core.mail import send_mail
-import random
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework_simplejwt.tokens import RefreshToken
-from .permissions import IsAdmin
 from django.conf import settings
+from django.utils import timezone
+from django.contrib.auth import get_user_model
 import jwt
+import random
+import logging
 from datetime import datetime
 import datetime as dt
-from django.utils import timezone
-from rest_framework.permissions import IsAuthenticated, AllowAny
-import logging
-from django.contrib.auth import get_user_model
 
+from .models import Token
+from .permissions import IsAdmin
 from .serializers import (
     SignUpSerializer,
     LoginSerializer,
@@ -30,6 +30,7 @@ from .serializers import (
 logger = logging.getLogger(__name__)
 User = get_user_model()
 
+# -------------------- Initial Admin SignUp -------------------- #
 class InitialAdminSignUpView(APIView):
     permission_classes = [AllowAny]
 
@@ -44,13 +45,14 @@ class InitialAdminSignUpView(APIView):
             user.is_email_verified = True
             user.save()
             
+            # Generate tokens
             refresh = RefreshToken.for_user(user)
             refresh_token = str(refresh)
             access_token = str(refresh.access_token)
             
+            # Decode to get expiry
             refresh_payload = jwt.decode(refresh_token, settings.SECRET_KEY, algorithms=["HS256"])
             access_payload = jwt.decode(access_token, settings.SECRET_KEY, algorithms=["HS256"])
-            
             refresh_expires_at = datetime.fromtimestamp(refresh_payload['exp'], tz=dt.timezone.utc)
             access_expires_at = datetime.fromtimestamp(access_payload['exp'], tz=dt.timezone.utc)
             
@@ -66,6 +68,7 @@ class InitialAdminSignUpView(APIView):
             code = str(random.randint(100000, 999999))
             user.email_verification_code = code
             user.save()
+            
             send_mail(
                 'Verify Your Admin Email',
                 f'Your verification code is {code} (already verified for initial admin).',
@@ -78,10 +81,12 @@ class InitialAdminSignUpView(APIView):
                 "message": "Initial admin created successfully.",
                 "refresh": refresh_token,
                 "access": access_token,
-                "role": user.role
+                "role": user.role,
+                "email": user.email
             }, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+# -------------------- User SignUp -------------------- #
 class SignUpView(APIView):
     permission_classes = [AllowAny]
 
@@ -98,14 +103,12 @@ class SignUpView(APIView):
             refresh_token = str(refresh)
             access_token = str(refresh.access_token)
             
-            # Decode tokens to get expiration times
             refresh_payload = jwt.decode(refresh_token, settings.SECRET_KEY, algorithms=["HS256"])
             access_payload = jwt.decode(access_token, settings.SECRET_KEY, algorithms=["HS256"])
             
             refresh_expires_at = datetime.fromtimestamp(refresh_payload['exp'], tz=dt.timezone.utc)
             access_expires_at = datetime.fromtimestamp(access_payload['exp'], tz=dt.timezone.utc)
             
-            # Save tokens to Token model
             Token.objects.create(
                 user=user,
                 email=user.email,
@@ -115,7 +118,6 @@ class SignUpView(APIView):
                 access_token_expires_at=access_expires_at
             )
             
-            # Send OTP email
             send_mail(
                 'Verify Your Email',
                 f'Your verification code is {code}',
@@ -128,10 +130,12 @@ class SignUpView(APIView):
                 "message": "User created. Verification code sent to email.",
                 "refresh": refresh_token,
                 "access": access_token,
-                "role": user.role
+                "role": user.role,
+                "email": user.email
             }, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+# -------------------- Admin SignUp -------------------- #
 class AdminSignUpView(APIView):
     permission_classes = [IsAdmin]
 
@@ -151,9 +155,10 @@ class AdminSignUpView(APIView):
                 fail_silently=False,
             )
             logger.info(f"Admin created by {request.user.email}: {user.email}")
-            return Response({"message": "Admin created. Verification code sent to email."}, status=status.HTTP_201_CREATED)
+            return Response({"message": "Admin created. Verification code sent to email.", "email": user.email}, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+# -------------------- Resend OTP -------------------- #
 class ResendOTPView(APIView):
     permission_classes = [AllowAny]
 
@@ -182,11 +187,12 @@ class ResendOTPView(APIView):
                 fail_silently=False,
             )
             logger.info(f"Resend OTP sent to: {user.email}")
-            return Response({"message": "New OTP sent to email."}, status=status.HTTP_200_OK)
+            return Response({"message": "New OTP sent to email.", "email": user.email}, status=status.HTTP_200_OK)
         except Exception as e:
             logger.error(f"Failed to resend OTP to {user.email}: {str(e)}")
             return Response({"error": "Failed to send OTP. Please try again."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+# -------------------- Login -------------------- #
 class LoginView(APIView):
     permission_classes = [AllowAny]
 
@@ -199,6 +205,7 @@ class LoginView(APIView):
             if user and user.check_password(password):
                 if not user.is_email_verified:
                     return Response({"error": "Email not verified."}, status=status.HTTP_403_FORBIDDEN)
+                
                 refresh = RefreshToken.for_user(user)
                 refresh_token = str(refresh)
                 access_token = str(refresh.access_token)
@@ -221,35 +228,37 @@ class LoginView(APIView):
                 return Response({
                     "refresh": refresh_token,
                     "access": access_token,
-                    "role": user.role
+                    "role": user.role,
+                    "email": user.email
                 })
             return Response({"error": "Invalid credentials."}, status=status.HTTP_401_UNAUTHORIZED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+# -------------------- Email Verification -------------------- #
 class EmailVerificationView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
-        serializer = EmailVerificationSerializer(data=request.data)
-        if serializer.is_valid():
-            code = serializer.validated_data['code']
-            user = User.objects.filter(email_verification_code=code).last()
-            if not user:
-                return Response({"error": "Invalid OTP."}, status=status.HTTP_400_BAD_REQUEST)
-            
-            user.is_email_verified = True
-            user.email_verification_code = None
-            user.save()
-            logger.info(f"OTP verified: {user.email}")
-            return Response({
-                "message": "OTP verified successfully.",
-                "user": {
-                    "email": user.email,
-                    "role": user.role
-                }
-            }, status=status.HTTP_200_OK)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        email = request.data.get("email")
+        code = request.data.get("code")
 
+        if not email or not code:
+            return Response({"error": "Email and Code are required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        user = User.objects.filter(email=email, email_verification_code=code).first()
+        if not user:
+            return Response({"error": "Invalid email or OTP."}, status=status.HTTP_400_BAD_REQUEST)
+        
+        user.is_email_verified = True
+        user.email_verification_code = None
+        user.save()
+        logger.info(f"OTP verified: {user.email}")
+        return Response({
+            "message": "OTP verified successfully.",
+            "user": {"email": user.email, "role": user.role}
+        }, status=status.HTTP_200_OK)
+
+# -------------------- Password Reset Request -------------------- #
 class PasswordResetRequestView(APIView):
     permission_classes = [AllowAny]
 
@@ -262,37 +271,37 @@ class PasswordResetRequestView(APIView):
                 return Response({"error": "User with this email does not exist."}, status=status.HTTP_404_NOT_FOUND)
             
             code = user.generate_password_reset_code()
-            try:
-                send_mail(
-                    'Password Reset OTP',
-                    f'Your OTP for password reset is {code}. It expires in 10 minutes.',
-                    settings.EMAIL_HOST_USER,
-                    [user.email],
-                    fail_silently=False,
-                )
-                logger.info(f"Password reset OTP sent to: {user.email}")
-                return Response({"message": "OTP sent to email for password reset."}, status=status.HTTP_200_OK)
-            except Exception as e:
-                logger.error(f"Failed to send OTP to {user.email}: {str(e)}")
-                return Response({"error": "Failed to send OTP. Please try again."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            send_mail(
+                'Password Reset OTP',
+                f'Your OTP for password reset is {code}. It expires in 10 minutes.',
+                settings.EMAIL_HOST_USER,
+                [user.email],
+                fail_silently=False,
+            )
+            logger.info(f"Password reset OTP sent to: {user.email}")
+            return Response({"message": "OTP sent to email for password reset.", "email": user.email}, status=status.HTTP_200_OK)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+# -------------------- Password Reset Verify -------------------- #
 class PasswordResetVerifyCodeView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
-        code = request.data.get('code')
-        if not code:
-            return Response({"error": "Code is required."}, status=status.HTTP_400_BAD_REQUEST)
+        email = request.data.get("email")
+        code = request.data.get("code")
 
-        user = User.objects.filter(password_reset_code=code).last()
+        if not email or not code:
+            return Response({"error": "Email and Code are required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        user = User.objects.filter(email=email, password_reset_code=code).first()
         if not user:
-            return Response({"error": "Invalid OTP."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": "Invalid email or OTP."}, status=status.HTTP_400_BAD_REQUEST)
         if user.password_reset_code_expires_at < timezone.now():
             return Response({"error": "OTP has expired."}, status=status.HTTP_400_BAD_REQUEST)
 
-        return Response({"message": "OTP verified. You can now set a new password."}, status=status.HTTP_200_OK)
+        return Response({"message": "OTP verified. You can now set a new password.", "email": user.email}, status=status.HTTP_200_OK)
 
+# -------------------- Password Reset Set -------------------- #
 class PasswordResetSetPasswordView(APIView):
     permission_classes = [AllowAny]
 
@@ -304,35 +313,30 @@ class PasswordResetSetPasswordView(APIView):
             new_password = serializer.validated_data['new_password']
             
             user = None
-            if code:
-                # OTP flow
-                user = User.objects.filter(password_reset_code=code).last()
+            if code and email:
+                user = User.objects.filter(email=email, password_reset_code=code).first()
                 if not user:
-                    return Response({"error": "Invalid OTP."}, status=status.HTTP_400_BAD_REQUEST)
+                    return Response({"error": "Invalid email or OTP."}, status=status.HTTP_400_BAD_REQUEST)
                 if user.password_reset_code_expires_at < timezone.now():
                     return Response({"error": "OTP has expired."}, status=status.HTTP_400_BAD_REQUEST)
                 user.password_reset_code = None
                 user.password_reset_code_expires_at = None
             elif email:
-                # Email-based reset (no OTP, for demo/simplicity)
                 user = User.objects.filter(email=email).first()
                 if not user:
                     return Response({"error": "User with this email does not exist."}, status=status.HTTP_404_NOT_FOUND)
-                # Optional: Check if recent reset request exists, but skip for now
             else:
-                # Authenticated flow
                 if not request.user.is_authenticated:
                     return Response({"error": "Authentication required."}, status=status.HTTP_401_UNAUTHORIZED)
                 user = request.user
             
-            if user:
-                user.set_password(new_password)
-                user.save()
-                logger.info(f"Password reset/changed for: {user.email}")
-                return Response({"message": "Password reset successfully."}, status=status.HTTP_200_OK)
-            return Response({"error": "User not found."}, status=status.HTTP_404_NOT_FOUND)
+            user.set_password(new_password)
+            user.save()
+            logger.info(f"Password reset/changed for: {user.email}")
+            return Response({"message": "Password reset successfully."}, status=status.HTTP_200_OK)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+# -------------------- Password Change Without OTP -------------------- #
 class PasswordResetSetPasswordWithoutOTPView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -347,6 +351,7 @@ class PasswordResetSetPasswordWithoutOTPView(APIView):
             return Response({"message": "Password changed successfully."}, status=status.HTTP_200_OK)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+# -------------------- Admin Dashboard -------------------- #
 class AdminDashboardView(APIView):
     permission_classes = [IsAdmin]
 
@@ -354,11 +359,9 @@ class AdminDashboardView(APIView):
         users = User.objects.all()
         serializer = UserSerializer(users, many=True)
         logger.info(f"Admin dashboard accessed by: {request.user.email}")
-        return Response({
-            "message": "Welcome to Admin Dashboard",
-            "users": serializer.data
-        }, status=status.HTTP_200_OK)
+        return Response({"message": "Welcome to Admin Dashboard", "users": serializer.data}, status=status.HTTP_200_OK)
 
+# -------------------- Admin User Management -------------------- #
 class AdminUserManagementView(APIView):
     permission_classes = [IsAdmin]
 
@@ -381,10 +384,7 @@ class AdminUserManagementView(APIView):
             user.save()
             serializer = UserSerializer(user)
             logger.info(f"User {user.email} role updated to {role} by {request.user.email}")
-            return Response({
-                "message": "User role updated successfully.",
-                "user": serializer.data
-            }, status=status.HTTP_200_OK)
+            return Response({"message": "User role updated successfully.", "user": serializer.data}, status=status.HTTP_200_OK)
         except User.DoesNotExist:
             return Response({"error": "User not found."}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -398,6 +398,7 @@ class AdminUserManagementView(APIView):
         except User.DoesNotExist:
             return Response({"error": "User not found."}, status=status.HTTP_404_NOT_FOUND)
 
+# -------------------- Logout -------------------- #
 class LogoutView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -409,11 +410,7 @@ class LogoutView(APIView):
             if not user.check_password(password):
                 return Response({"error": "Invalid password."}, status=status.HTTP_401_UNAUTHORIZED)
             
-            try:
-                Token.objects.filter(user=user).delete()
-                logger.info(f"All tokens deleted for user: {user.email}")
-                return Response({"message": "Successfully logged out."}, status=status.HTTP_205_RESET_CONTENT)
-            except Exception as e:
-                logger.error(f"Logout error for {user.email}: {str(e)}")
-                return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+            Token.objects.filter(user=user).delete()
+            logger.info(f"All tokens deleted for user: {user.email}")
+            return Response({"message": "Successfully logged out."}, status=status.HTTP_205_RESET_CONTENT)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
