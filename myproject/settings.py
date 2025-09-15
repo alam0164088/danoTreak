@@ -49,6 +49,11 @@ INSTALLED_APPS = [
     "authentication",
     "payment",
     "tts_app",
+    "bot",
+    "rest_framework_simplejwt",
+
+
+
 ]
 
 # ------------------------------

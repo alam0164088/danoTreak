@@ -11,7 +11,7 @@ import jwt
 from datetime import datetime
 import datetime as dt
 from django.utils import timezone
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, AllowAny  # Ensure AllowAny is imported
 import logging
 from django.contrib.auth import get_user_model
 
@@ -30,9 +30,8 @@ from .serializers import (
 logger = logging.getLogger(__name__)
 User = get_user_model()
 
-
 class InitialAdminSignUpView(APIView):
-    permission_classes = []
+    permission_classes = [AllowAny]
 
     def post(self, request):
         if User.objects.filter(role='admin').exists():
@@ -84,7 +83,7 @@ class InitialAdminSignUpView(APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 class SignUpView(APIView):
-    permission_classes = []
+    permission_classes = [AllowAny]
 
     def post(self, request):
         serializer = SignUpSerializer(data=request.data)
@@ -127,7 +126,7 @@ class AdminSignUpView(APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 class LoginView(APIView):
-    permission_classes = []
+    permission_classes = [AllowAny]
 
     def post(self, request):
         serializer = LoginSerializer(data=request.data)
@@ -166,7 +165,7 @@ class LoginView(APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 class EmailVerificationView(APIView):
-    permission_classes = []
+    permission_classes = [AllowAny]
 
     def post(self, request):
         serializer = EmailVerificationSerializer(data=request.data)
@@ -189,9 +188,8 @@ class EmailVerificationView(APIView):
             }, status=status.HTTP_200_OK)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-
 class PasswordResetRequestView(APIView):
-    permission_classes = []
+    permission_classes = [AllowAny]
 
     def post(self, request):
         serializer = PasswordResetRequestSerializer(data=request.data)
@@ -217,9 +215,8 @@ class PasswordResetRequestView(APIView):
                 return Response({"error": "Failed to send OTP. Please try again."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-
 class PasswordResetVerifyCodeView(APIView):
-    permission_classes = []
+    permission_classes = [AllowAny]
 
     def post(self, request):
         code = request.data.get('code')
@@ -235,7 +232,7 @@ class PasswordResetVerifyCodeView(APIView):
         return Response({"message": "OTP verified. You can now set a new password."}, status=status.HTTP_200_OK)
 
 class PasswordResetSetPasswordView(APIView):
-    permission_classes = []
+    permission_classes = [AllowAny]
 
     def post(self, request):
         serializer = PasswordResetSetPasswordSerializer(data=request.data)
@@ -274,7 +271,6 @@ class PasswordResetSetPasswordView(APIView):
             return Response({"error": "User not found."}, status=status.HTTP_404_NOT_FOUND)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-
 class PasswordResetSetPasswordWithoutOTPView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -288,7 +284,6 @@ class PasswordResetSetPasswordWithoutOTPView(APIView):
             logger.info(f"Password changed for user: {user.email}")
             return Response({"message": "Password changed successfully."}, status=status.HTTP_200_OK)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
 
 class AdminDashboardView(APIView):
     permission_classes = [IsAdmin]
