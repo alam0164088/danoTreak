@@ -1,190 +1,251 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-from django.core.mail import send_mail
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework_simplejwt.tokens import RefreshToken
+from django.core.mail import send_mail
 from django.conf import settings
 from django.utils import timezone
 from django.contrib.auth import get_user_model
 import jwt
-import random
+from datetime import timedelta
 import logging
-from datetime import datetime
-import datetime as dt
+from uuid import uuid4
 
-from .models import Token, Profile
+from .models import Token, Profile, PasswordResetSession
 from .permissions import IsAdmin
 from .serializers import (
-    SignUpSerializer,
-    LoginSerializer,
-    EmailVerificationSerializer,
-    UserSerializer,
-    PasswordResetRequestSerializer,
-    PasswordResetVerifyCodeSerializer,
-    PasswordResetSetPasswordSerializer,
-    PasswordResetSetPasswordWithoutOTPSerializer,
-    LogoutSerializer,
-    ProfileSerializer
+    RegisterSerializer, SendOTPSerializer, VerifyOTPSerializer, LoginSerializer,
+    RefreshTokenSerializer, LogoutSerializer, ForgotPasswordSerializer,
+    VerifyResetOTPSerializer, ResetPasswordSerializer, ChangePasswordSerializer,
+    Enable2FASerializer, Verify2FASerializer, ResendOTPSerializer, UserProfileSerializer,
+    ProfileUpdateSerializer
 )
 
 logger = logging.getLogger(__name__)
 User = get_user_model()
+
+class RegisterView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        serializer = RegisterSerializer(data=request.data)
+        if serializer.is_valid():
+            user = serializer.save()
+            if request.data.get('send_verification_otp', True):
+                code = user.generate_email_verification_code()
+                send_mail(
+                    'Verify Your Email',
+                    f'Your OTP is {code}. Expires in 5 minutes.',
+                    settings.DEFAULT_FROM_EMAIL,
+                    [user.email],
+                    fail_silently=False,
+                )
+                user.is_active = False  # Inactive until verified
+                user.save()
+                logger.info(f"User registered: {user.email}")
+                return Response({
+                    "id": user.id,
+                    "email": user.email,
+                    "is_active": False,
+                    "message": "User created. Verification OTP sent to email. OTP expires in 5 minutes."
+                }, status=status.HTTP_201_CREATED)
+            else:
+                user.is_active = True
+                user.is_email_verified = True
+                user.save()
+                return Response({
+                    "id": user.id,
+                    "email": user.email,
+                    "is_active": True,
+                    "message": "User created successfully."
+                }, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 class InitialAdminSignUpView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
         if User.objects.filter(role='admin').exists():
-            return Response({"error": "An admin already exists. Use admin-signup endpoint."}, status=status.HTTP_400_BAD_REQUEST)
-        
-        serializer = SignUpSerializer(data=request.data)
+            return Response({"detail": "An admin already exists. Use admin-signup endpoint."}, status=status.HTTP_400_BAD_REQUEST)
+        serializer = RegisterSerializer(data=request.data)
         if serializer.is_valid():
             user = serializer.save()
             user.role = 'admin'
             user.is_email_verified = True
+            user.is_active = True
             user.save()
-            
-            refresh = RefreshToken.for_user(user)
-            refresh_token = str(refresh)
-            access_token = str(refresh.access_token)
-            
-            refresh_payload = jwt.decode(refresh_token, settings.SECRET_KEY, algorithms=["HS256"])
-            access_payload = jwt.decode(access_token, settings.SECRET_KEY, algorithms=["HS256"])
-            refresh_expires_at = datetime.fromtimestamp(refresh_payload['exp'], tz=dt.timezone.utc)
-            access_expires_at = datetime.fromtimestamp(access_payload['exp'], tz=dt.timezone.utc)
-            
-            Token.objects.create(
-                user=user,
-                email=user.email,
-                refresh_token=refresh_token,
-                access_token=access_token,
-                refresh_token_expires_at=refresh_expires_at,
-                access_token_expires_at=access_expires_at
-            )
-            
-            code = str(random.randint(100000, 999999))
-            user.email_verification_code = code
-            user.save()
-            
+            code = user.generate_email_verification_code()
             send_mail(
                 'Verify Your Admin Email',
                 f'Your verification code is {code} (already verified for initial admin).',
-                settings.EMAIL_HOST_USER,
+                settings.DEFAULT_FROM_EMAIL,
                 [user.email],
                 fail_silently=False,
             )
-            logger.info(f"Initial admin created: {user.email}")
-            return Response({
-                "message": "Initial admin created successfully.",
-                "refresh": refresh_token,
-                "access": access_token,
-                "role": user.role,
-                "email": user.email
-            }, status=status.HTTP_201_CREATED)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-class SignUpView(APIView):
-    permission_classes = [AllowAny]
-
-    def post(self, request):
-        serializer = SignUpSerializer(data=request.data)
-        if serializer.is_valid():
-            user = serializer.save()
-            code = str(random.randint(100000, 999999))
-            user.email_verification_code = code
-            user.save()
-            
             refresh = RefreshToken.for_user(user)
             refresh_token = str(refresh)
             access_token = str(refresh.access_token)
-            
             refresh_payload = jwt.decode(refresh_token, settings.SECRET_KEY, algorithms=["HS256"])
             access_payload = jwt.decode(access_token, settings.SECRET_KEY, algorithms=["HS256"])
-            
-            refresh_expires_at = datetime.fromtimestamp(refresh_payload['exp'], tz=dt.timezone.utc)
-            access_expires_at = datetime.fromtimestamp(access_payload['exp'], tz=dt.timezone.utc)
-            
+            refresh_expires_in = int(refresh_payload['exp'] - refresh_payload['iat'])
+            access_expires_in = 900
             Token.objects.create(
                 user=user,
                 email=user.email,
                 refresh_token=refresh_token,
                 access_token=access_token,
-                refresh_token_expires_at=refresh_expires_at,
-                access_token_expires_at=access_expires_at
+                refresh_token_expires_at=timezone.now() + timedelta(seconds=refresh_expires_in),
+                access_token_expires_at=timezone.now() + timedelta(minutes=15)
             )
-            
-            send_mail(
-                'Verify Your Email',
-                f'Your verification code is {code}',
-                settings.EMAIL_HOST_USER,
-                [user.email],
-                fail_silently=False,
-            )
-            logger.info(f"User signed up: {user.email}")
+            logger.info(f"Initial admin created: {user.email}")
             return Response({
-                "message": "User created. Verification code sent to email.",
-                "refresh": refresh_token,
-                "access": access_token,
+                "id": user.id,
+                "email": user.email,
                 "role": user.role,
-                "email": user.email
+                "message": "Initial admin created successfully."
             }, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 class AdminSignUpView(APIView):
-    permission_classes = [IsAdmin]
+    permission_classes = [IsAuthenticated, IsAdmin]
 
     def post(self, request):
-        serializer = SignUpSerializer(data=request.data)
+        serializer = RegisterSerializer(data=request.data)
         if serializer.is_valid():
             user = serializer.save()
             user.role = 'admin'
-            code = str(random.randint(100000, 999999))
-            user.email_verification_code = code
+            user.is_active = False
             user.save()
+            code = user.generate_email_verification_code()
             send_mail(
                 'Verify Your Admin Email',
-                f'Your verification code is {code}',
-                settings.EMAIL_HOST_USER,
+                f'Your verification code is {code}. Expires in 5 minutes.',
+                settings.DEFAULT_FROM_EMAIL,
                 [user.email],
                 fail_silently=False,
             )
             logger.info(f"Admin created by {request.user.email}: {user.email}")
-            return Response({"message": "Admin created. Verification code sent to email.", "email": user.email}, status=status.HTTP_201_CREATED)
+            return Response({
+                "id": user.id,
+                "email": user.email,
+                "message": "Admin created. Verification OTP sent to email."
+            }, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-class ResendOTPView(APIView):
+class AdminUserManagementView(APIView):
+    permission_classes = [IsAuthenticated, IsAdmin]
+
+    def get(self, request, user_id=None):
+        if user_id:
+            try:
+                user = User.objects.get(id=user_id)
+                serializer = UserProfileSerializer(user)
+                logger.info(f"User {user.email} viewed by {request.user.email}")
+                return Response(serializer.data, status=status.HTTP_200_OK)
+            except User.DoesNotExist:
+                return Response({"detail": "User not found."}, status=status.HTTP_404_NOT_FOUND)
+        else:
+            users = User.objects.all()
+            serializer = UserProfileSerializer(users, many=True)
+            logger.info(f"User list accessed by: {request.user.email}")
+            return Response({"users": serializer.data}, status=status.HTTP_200_OK)
+
+    def put(self, request, user_id):
+        try:
+            user = User.objects.get(id=user_id)
+            role = request.data.get('role')
+            if role not in ['admin', 'user']:
+                return Response({"detail": "Invalid role. Must be 'admin' or 'user'."}, status=status.HTTP_400_BAD_REQUEST)
+            user.role = role
+            user.save()
+            serializer = UserProfileSerializer(user)
+            logger.info(f"User {user.email} role updated to {role} by {request.user.email}")
+            return Response({"message": "User role updated successfully.", "user": serializer.data}, status=status.HTTP_200_OK)
+        except User.DoesNotExist:
+            return Response({"detail": "User not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    def delete(self, request, user_id):
+        try:
+            user = User.objects.get(id=user_id)
+            user_email = user.email
+            user.delete()
+            logger.info(f"User {user_email} deleted by {request.user.email}")
+            return Response({"message": "User deleted successfully."}, status=status.HTTP_204_NO_CONTENT)
+        except User.DoesNotExist:
+            return Response({"detail": "User not found."}, status=status.HTTP_404_NOT_FOUND)
+
+class SendOTPView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
-        email = request.data.get('email')
-        if not email:
-            return Response({"error": "Email is required."}, status=status.HTTP_400_BAD_REQUEST)
-
-        user = User.objects.filter(email=email).first()
-        if not user:
-            return Response({"error": "User with this email does not exist."}, status=status.HTTP_404_NOT_FOUND)
-        
-        if user.is_email_verified:
-            return Response({"error": "Email is already verified."}, status=status.HTTP_400_BAD_REQUEST)
-        
-        code = str(random.randint(100000, 999999))
-        user.email_verification_code = code
-        user.save()
-        
-        try:
+        serializer = SendOTPSerializer(data=request.data)
+        if serializer.is_valid():
+            email = serializer.validated_data['email']
+            purpose = serializer.validated_data['purpose']
+            user = User.objects.filter(email=email).first()
+            if not user:
+                return Response({"detail": "If the email exists, an OTP has been sent."}, status=status.HTTP_200_OK)
+            if purpose == 'email_verification':
+                if user.is_email_verified:
+                    return Response({"detail": "Email already verified."}, status=status.HTTP_400_BAD_REQUEST)
+                code = user.generate_email_verification_code()
+            elif purpose == 'password_reset':
+                code = user.generate_password_reset_code()
+            else:  # two_factor
+                code = user.generate_email_verification_code()
             send_mail(
-                'Verify Your Email',
-                f'Your new verification code is {code}',
-                settings.EMAIL_HOST_USER,
+                f'{purpose.replace("_", " ").title()} OTP',
+                f'Your OTP is {code}. Expires in 5 minutes.',
+                settings.DEFAULT_FROM_EMAIL,
                 [user.email],
                 fail_silently=False,
             )
-            logger.info(f"Resend OTP sent to: {user.email}")
-            return Response({"message": "New OTP sent to email.", "email": user.email}, status=status.HTTP_200_OK)
-        except Exception as e:
-            logger.error(f"Failed to resend OTP to {user.email}: {str(e)}")
-            return Response({"error": "Failed to send OTP. Please try again."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            logger.info(f"OTP sent for {purpose}: {user.email}")
+            return Response({"message": "OTP sent to email. Expires in 5 minutes."}, status=status.HTTP_200_OK)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+class VerifyOTPView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        serializer = VerifyOTPSerializer(data=request.data)
+        if serializer.is_valid():
+            email = serializer.validated_data['email']
+            otp = serializer.validated_data['otp']
+            purpose = serializer.validated_data['purpose']
+            user = User.objects.filter(email=email).first()
+            if not user:
+                return Response({"detail": "Invalid OTP."}, status=status.HTTP_400_BAD_REQUEST)
+            if purpose == 'email_verification':
+                if user.is_email_verified:
+                    return Response({"detail": "Email already verified."}, status=status.HTTP_400_BAD_REQUEST)
+                if (user.email_verification_code != otp or
+                    user.email_verification_code_expires_at < timezone.now()):
+                    return Response({"detail": "OTP expired or invalid."}, status=status.HTTP_400_BAD_REQUEST)
+                user.is_email_verified = True
+                user.is_active = True
+                user.email_verification_code = None
+                user.email_verification_code_expires_at = None
+                user.save()
+                return Response({"message": "Email verified successfully.", "email_verified": True}, status=status.HTTP_200_OK)
+            elif purpose == 'password_reset':
+                if (user.password_reset_code != otp or
+                    user.password_reset_code_expires_at < timezone.now()):
+                    return Response({"detail": "OTP expired or invalid."}, status=status.HTTP_400_BAD_REQUEST)
+                reset_token = str(uuid4())
+                PasswordResetSession.objects.create(user=user, token=reset_token)
+                return Response({
+                    "message": "OTP verified. You may now reset your password.",
+                    "reset_token": reset_token
+                }, status=status.HTTP_200_OK)
+            elif purpose == 'two_factor':
+                if (user.email_verification_code != otp or
+                    user.email_verification_code_expires_at < timezone.now()):
+                    return Response({"detail": "OTP expired or invalid."}, status=status.HTTP_400_BAD_REQUEST)
+                return Response({"message": "2FA OTP verified successfully."}, status=status.HTTP_200_OK)
+            return Response({"detail": "Invalid purpose."}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 class LoginView(APIView):
     permission_classes = [AllowAny]
@@ -197,223 +258,259 @@ class LoginView(APIView):
             user = User.objects.filter(email=email).first()
             if user and user.check_password(password):
                 if not user.is_email_verified:
-                    return Response({"error": "Email not verified."}, status=status.HTTP_403_FORBIDDEN)
-                
+                    return Response({"detail": "Email not verified."}, status=status.HTTP_403_FORBIDDEN)
+                if user.is_2fa_enabled:
+                    code = user.generate_email_verification_code()
+                    send_mail(
+                        '2FA Verification',
+                        f'Your 2FA OTP is {code}. Expires in 5 minutes.',
+                        settings.DEFAULT_FROM_EMAIL,
+                        [user.email],
+                        fail_silently=False,
+                    )
+                    return Response({
+                        "detail": "2FA required. OTP sent to email.",
+                        "next_step": "verify_2fa_otp"
+                    }, status=status.HTTP_206_PARTIAL_CONTENT)
                 refresh = RefreshToken.for_user(user)
-                refresh_token = str(refresh)
-                access_token = str(refresh.access_token)
-                
-                refresh_payload = jwt.decode(refresh_token, settings.SECRET_KEY, algorithms=["HS256"])
-                access_payload = jwt.decode(access_token, settings.SECRET_KEY, algorithms=["HS256"])
-                
-                refresh_expires_at = datetime.fromtimestamp(refresh_payload['exp'], tz=dt.timezone.utc)
-                access_expires_at = datetime.fromtimestamp(access_payload['exp'], tz=dt.timezone.utc)
-                
+                if serializer.validated_data['remember_me']:
+                    refresh.set_exp(lifetime=timedelta(days=30))
+                else:
+                    refresh.set_exp(lifetime=timedelta(days=7))
+                refresh_token_str = str(refresh)
+                access_token_str = str(refresh.access_token)
+                refresh_payload = jwt.decode(refresh_token_str, settings.SECRET_KEY, algorithms=["HS256"])
+                access_payload = jwt.decode(access_token_str, settings.SECRET_KEY, algorithms=["HS256"])
+                refresh_expires_in = int(refresh_payload['exp'] - refresh_payload['iat'])
+                access_expires_in = 900
                 Token.objects.create(
                     user=user,
                     email=user.email,
-                    refresh_token=refresh_token,
-                    access_token=access_token,
-                    refresh_token_expires_at=refresh_expires_at,
-                    access_token_expires_at=access_expires_at
+                    refresh_token=refresh_token_str,
+                    access_token=access_token_str,
+                    refresh_token_expires_at=timezone.now() + timedelta(seconds=refresh_expires_in),
+                    access_token_expires_at=timezone.now() + timedelta(minutes=15)
                 )
                 logger.info(f"User logged in: {user.email}")
                 return Response({
-                    "refresh": refresh_token,
-                    "access": access_token,
-                    "role": user.role,
-                    "email": user.email
-                })
-            return Response({"error": "Invalid credentials."}, status=status.HTTP_401_UNAUTHORIZED)
+                    "access_token": access_token_str,
+                    "access_token_expires_in": access_expires_in,
+                    "refresh_token": refresh_token_str,
+                    "refresh_token_expires_in": refresh_expires_in,
+                    "token_type": "Bearer",
+                    "user": {
+                        "id": user.id,
+                        "email": user.email,
+                        "full_name": user.full_name,
+                        "email_verified": user.is_email_verified,
+                        "role": user.role
+                    }
+                }, status=status.HTTP_200_OK)
+            return Response({"detail": "Invalid credentials."}, status=status.HTTP_401_UNAUTHORIZED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-class EmailVerificationView(APIView):
+class RefreshTokenView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
-        email = request.data.get("email")
-        code = request.data.get("code")
-
-        if not email or not code:
-            return Response({"error": "Email and Code are required."}, status=status.HTTP_400_BAD_REQUEST)
-
-        user = User.objects.filter(email=email, email_verification_code=code).first()
-        if not user:
-            return Response({"error": "Invalid email or OTP."}, status=status.HTTP_400_BAD_REQUEST)
-        
-        user.is_email_verified = True
-        user.email_verification_code = None
-        user.save()
-        logger.info(f"OTP verified: {user.email}")
-        return Response({
-            "message": "OTP verified successfully.",
-            "user": {"email": user.email, "role": user.role}
-        }, status=status.HTTP_200_OK)
-
-class PasswordResetRequestView(APIView):
-    permission_classes = [AllowAny]
-
-    def post(self, request):
-        serializer = PasswordResetRequestSerializer(data=request.data)
+        serializer = RefreshTokenSerializer(data=request.data)
         if serializer.is_valid():
-            email = serializer.validated_data['email']
-            user = User.objects.filter(email=email).first()
-            if not user:
-                return Response({"error": "User with this email does not exist."}, status=status.HTTP_404_NOT_FOUND)
-            
-            code = user.generate_password_reset_code()
-            send_mail(
-                'Password Reset OTP',
-                f'Your OTP for password reset is {code}. It expires in 10 minutes.',
-                settings.EMAIL_HOST_USER,
-                [user.email],
-                fail_silently=False,
-            )
-            logger.info(f"Password reset OTP sent to: {user.email}")
-            return Response({"message": "OTP sent to email for password reset.", "email": user.email}, status=status.HTTP_200_OK)
+            refresh_token_str = serializer.validated_data['refresh_token']
+            try:
+                refresh = RefreshToken(refresh_token_str)
+                user = User.objects.get(id=refresh.payload['user_id'])
+                token_obj = Token.objects.filter(user=user, refresh_token=refresh_token_str, revoked=False).first()
+                if not token_obj or token_obj.refresh_token_expires_at < timezone.now():
+                    return Response({"detail": "Refresh token invalid/expired."}, status=status.HTTP_401_UNAUTHORIZED)
+                new_access = refresh.access_token
+                access_expires_in = 900
+                token_obj.access_token = str(new_access)
+                token_obj.access_token_expires_at = timezone.now() + timedelta(minutes=15)
+                token_obj.save()
+                return Response({
+                    "access_token": str(new_access),
+                    "access_token_expires_in": access_expires_in
+                }, status=status.HTTP_200_OK)
+            except Exception:
+                return Response({"detail": "Refresh token invalid/expired."}, status=status.HTTP_401_UNAUTHORIZED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-class PasswordResetVerifyCodeView(APIView):
-    permission_classes = [AllowAny]
-
-    def post(self, request):
-        email = request.data.get("email")
-        code = request.data.get("code")
-
-        if not email or not code:
-            return Response({"error": "Email and Code are required."}, status=status.HTTP_400_BAD_REQUEST)
-
-        user = User.objects.filter(email=email, password_reset_code=code).first()
-        if not user:
-            return Response({"error": "Invalid email or OTP."}, status=status.HTTP_400_BAD_REQUEST)
-        if user.password_reset_code_expires_at < timezone.now():
-            return Response({"error": "OTP has expired."}, status=status.HTTP_400_BAD_REQUEST)
-
-        return Response({"message": "OTP verified. You can now set a new password.", "email": user.email}, status=status.HTTP_200_OK)
-
-class PasswordResetSetPasswordView(APIView):
-    permission_classes = [AllowAny]
-
-    def post(self, request):
-        serializer = PasswordResetSetPasswordSerializer(data=request.data)
-        if serializer.is_valid():
-            code = serializer.validated_data.get('code')
-            email = serializer.validated_data.get('email')
-            new_password = serializer.validated_data['new_password']
-            
-            user = None
-            if code and email:
-                user = User.objects.filter(email=email, password_reset_code=code).first()
-                if not user:
-                    return Response({"error": "Invalid email or OTP."}, status=status.HTTP_400_BAD_REQUEST)
-                if user.password_reset_code_expires_at < timezone.now():
-                    return Response({"error": "OTP has expired."}, status=status.HTTP_400_BAD_REQUEST)
-                user.password_reset_code = None
-                user.password_reset_code_expires_at = None
-            elif email:
-                user = User.objects.filter(email=email).first()
-                if not user:
-                    return Response({"error": "User with this email does not exist."}, status=status.HTTP_404_NOT_FOUND)
-            else:
-                if not request.user.is_authenticated:
-                    return Response({"error": "Authentication required."}, status=status.HTTP_401_UNAUTHORIZED)
-                user = request.user
-            
-            user.set_password(new_password)
-            user.save()
-            logger.info(f"Password reset/changed for: {user.email}")
-            return Response({"message": "Password reset successfully."}, status=status.HTTP_200_OK)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-class PasswordResetSetPasswordWithoutOTPView(APIView):
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request):
-        serializer = PasswordResetSetPasswordWithoutOTPSerializer(data=request.data)
-        if serializer.is_valid():
-            new_password = serializer.validated_data['new_password']
-            user = request.user
-            user.set_password(new_password)
-            user.save()
-            logger.info(f"Password changed for user: {user.email}")
-            return Response({"message": "Password changed successfully."}, status=status.HTTP_200_OK)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-class AdminDashboardView(APIView):
-    permission_classes = [IsAdmin]
-
-    def get(self, request):
-        users = User.objects.all()
-        serializer = UserSerializer(users, many=True)
-        logger.info(f"Admin dashboard accessed by: {request.user.email}")
-        return Response({"message": "Welcome to Admin Dashboard", "users": serializer.data}, status=status.HTTP_200_OK)
-
-class AdminUserManagementView(APIView):
-    permission_classes = [IsAdmin]
-
-    def get(self, request, user_id):
-        try:
-            user = User.objects.get(id=user_id)
-            serializer = UserSerializer(user)
-            logger.info(f"User {user.email} viewed by {request.user.email}")
-            return Response(serializer.data, status=status.HTTP_200_OK)
-        except User.DoesNotExist:
-            return Response({"error": "User not found."}, status=status.HTTP_404_NOT_FOUND)
-
-    def put(self, request, user_id):
-        try:
-            user = User.objects.get(id=user_id)
-            role = request.data.get('role')
-            if role not in ['admin', 'user']:
-                return Response({"error": "Invalid role. Must be 'admin' or 'user'."}, status=status.HTTP_400_BAD_REQUEST)
-            user.role = role
-            user.save()
-            serializer = UserSerializer(user)
-            logger.info(f"User {user.email} role updated to {role} by {request.user.email}")
-            return Response({"message": "User role updated successfully.", "user": serializer.data}, status=status.HTTP_200_OK)
-        except User.DoesNotExist:
-            return Response({"error": "User not found."}, status=status.HTTP_400_BAD_REQUEST)
-
-    def delete(self, request, user_id):
-        try:
-            user = User.objects.get(id=user_id)
-            user_email = user.email
-            user.delete()
-            logger.info(f"User {user_email} deleted by {request.user.email}")
-            return Response({"message": "User deleted successfully."}, status=status.HTTP_204_NO_CONTENT)
-        except User.DoesNotExist:
-            return Response({"error": "User not found."}, status=status.HTTP_404_NOT_FOUND)
 
 class LogoutView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        serializer = LogoutSerializer(data=request.data)
+        refresh_token_str = request.data.get('refresh_token')
+        if refresh_token_str:
+            Token.objects.filter(refresh_token=refresh_token_str, user=request.user, revoked=False).update(revoked=True)
+        else:
+            Token.objects.filter(user=request.user, revoked=False).update(revoked=True)
+        logger.info(f"User logged out: {request.user.email}")
+        return Response({"message": "Logged out. Refresh token revoked."}, status=status.HTTP_200_OK)
+
+class ForgotPasswordView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        serializer = ForgotPasswordSerializer(data=request.data)
         if serializer.is_valid():
-            password = serializer.validated_data['password']
-            user = request.user
-            if not user.check_password(password):
-                return Response({"error": "Invalid password."}, status=status.HTTP_401_UNAUTHORIZED)
-            
-            Token.objects.filter(user=user).delete()
-            logger.info(f"All tokens deleted for user: {user.email}")
-            return Response({"message": "Successfully logged out."}, status=status.HTTP_205_RESET_CONTENT)
+            email = serializer.validated_data['email']
+            user = User.objects.filter(email=email).first()
+            if user:
+                code = user.generate_password_reset_code()
+                send_mail(
+                    'Password Reset',
+                    f'Your OTP is {code}. Expires in 15 minutes.',
+                    settings.DEFAULT_FROM_EMAIL,
+                    [user.email],
+                    fail_silently=False,
+                )
+            logger.info(f"Password reset requested for: {email}")
+            return Response({
+                "message": "If the email exists, a password reset OTP has been sent. Expires in 15 minutes."
+            }, status=status.HTTP_200_OK)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-class ProfileView(APIView):
+class VerifyResetOTPView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        serializer = VerifyResetOTPSerializer(data=request.data)
+        if serializer.is_valid():
+            email = serializer.validated_data['email']
+            otp = serializer.validated_data['otp']
+            user = User.objects.filter(email=email).first()
+            if not user or user.password_reset_code != otp or user.password_reset_code_expires_at < timezone.now():
+                return Response({"detail": "OTP expired or invalid."}, status=status.HTTP_400_BAD_REQUEST)
+            reset_token = str(uuid4())
+            PasswordResetSession.objects.create(user=user, token=reset_token)
+            return Response({
+                "message": "OTP verified. You may now reset your password.",
+                "reset_token": reset_token
+            }, status=status.HTTP_200_OK)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+class ResetPasswordConfirmView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        serializer = ResetPasswordSerializer(data=request.data)
+        if serializer.is_valid():
+            reset_token = serializer.validated_data['reset_token']
+            new_password = serializer.validated_data['new_password']
+            session = PasswordResetSession.objects.filter(token=reset_token).first()
+            if not session or session.is_expired():
+                return Response({"detail": "Reset token invalid or expired."}, status=status.HTTP_401_UNAUTHORIZED)
+            user = session.user
+            user.set_password(new_password)
+            user.password_reset_code = None
+            user.password_reset_code_expires_at = None
+            user.save()
+            session.delete()
+            Token.objects.filter(user=user).update(revoked=True)
+            logger.info(f"Password reset for: {user.email}")
+            return Response({"message": "Password reset successfully. Please login with new password."}, status=status.HTTP_200_OK)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+class ChangePasswordView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = ChangePasswordSerializer(data=request.data)
+        if serializer.is_valid():
+            if not request.user.check_password(serializer.validated_data['old_password']):
+                return Response({"detail": "Old password incorrect."}, status=status.HTTP_400_BAD_REQUEST)
+            request.user.set_password(serializer.validated_data['new_password'])
+            request.user.save()
+            Token.objects.filter(user=request.user).update(revoked=True)
+            logger.info(f"Password changed for: {request.user.email}")
+            return Response({"message": "Password changed successfully. All existing refresh tokens revoked."}, status=status.HTTP_200_OK)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+class Enable2FAView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = Enable2FASerializer(data=request.data)
+        if serializer.is_valid():
+            method = serializer.validated_data['method']
+            code = request.user.generate_email_verification_code()
+            send_mail(
+                'Enable 2FA',
+                f'Your OTP to enable 2FA is {code}. Expires in 5 minutes.',
+                settings.DEFAULT_FROM_EMAIL,
+                [request.user.email],
+                fail_silently=False,
+            )
+            logger.info(f"2FA enable initiated for: {request.user.email}")
+            return Response({
+                "message": "2FA enable initiated. Verify the OTP sent to your email to finish enabling 2FA.",
+                "next_step": "verify_2fa_otp"
+            }, status=status.HTTP_200_OK)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+class Verify2FAView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = Verify2FASerializer(data=request.data)
+        if serializer.is_valid():
+            otp = serializer.validated_data['otp']
+            method = serializer.validated_data['method']
+            if (request.user.email_verification_code != otp or
+                request.user.email_verification_code_expires_at < timezone.now()):
+                return Response({"detail": "OTP expired or invalid."}, status=status.HTTP_400_BAD_REQUEST)
+            request.user.is_2fa_enabled = True
+            request.user.email_verification_code = None
+            request.user.email_verification_code_expires_at = None
+            request.user.save()
+            logger.info(f"2FA enabled for: {request.user.email}")
+            return Response({"message": "2FA enabled successfully."}, status=status.HTTP_200_OK)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+class MeView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        profile, created = Profile.objects.get_or_create(user=request.user)
-        serializer = ProfileSerializer(profile)
-        logger.info(f"Profile viewed by: {request.user.email}")
+        serializer = UserProfileSerializer(request.user)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     def put(self, request):
-        profile, created = Profile.objects.get_or_create(user=request.user)
-        serializer = ProfileSerializer(profile, data=request.data, partial=True)
+        profile, _ = Profile.objects.get_or_create(user=request.user)
+        serializer = ProfileUpdateSerializer(profile, data=request.data, partial=True)
         if serializer.is_valid():
             serializer.save()
-            logger.info(f"Profile updated for user: {request.user.email}")
-            return Response(serializer.data, status=status.HTTP_200_OK)
+            return Response({"message": "Profile updated.", "user": UserProfileSerializer(request.user).data}, status=status.HTTP_200_OK)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def delete(self, request):
+        password = request.data.get('current_password')
+        if password and not request.user.check_password(password):
+            return Response({"detail": "Current password incorrect."}, status=status.HTTP_400_BAD_REQUEST)
+        email = request.user.email
+        request.user.delete()
+        logger.info(f"Account deleted: {email}")
+        return Response({"message": "Account deleted."}, status=status.HTTP_200_OK)
+
+class ResendOTPView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        serializer = ResendOTPSerializer(data=request.data)
+        if serializer.is_valid():
+            email = serializer.validated_data['email']
+            user = User.objects.filter(email=email).first()
+            if not user:
+                return Response({"detail": "If the email exists, an OTP has been sent."}, status=status.HTTP_200_OK)
+            if user.is_email_verified:
+                return Response({"detail": "Email already verified."}, status=status.HTTP_400_BAD_REQUEST)
+            code = user.generate_email_verification_code()
+            send_mail(
+                'Resend Verification OTP',
+                f'Your new OTP is {code}. Expires in 5 minutes.',
+                settings.DEFAULT_FROM_EMAIL,
+                [user.email],
+                fail_silently=False,
+            )
+            logger.info(f"OTP resent for: {user.email}")
+            return Response({"message": "Verification OTP resent. Expires in 5 minutes."}, status=status.HTTP_200_OK)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)

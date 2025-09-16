@@ -6,7 +6,7 @@ from tts_app.views import home  # Import the home view
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    path('api/auth/', include('authentication.urls')),
+    path('api/', include('authentication.urls')),
     path('api/payment/', include('payment.urls')),
     path('tts/', include('tts_app.urls')),
     path('api/bot/', include('bot.urls')),
