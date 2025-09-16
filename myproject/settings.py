@@ -160,3 +160,18 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # CORS Settings
 # ------------------------------
 CORS_ALLOW_ALL_ORIGINS = True   # ✅ Allow all origins (development use)
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+        },
+    },
+    'loggers': {
+        '': {
+            'handlers': ['console'],
+            'level': 'DEBUG',
+        },
+    },
+}

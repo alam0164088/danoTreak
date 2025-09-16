@@ -1,24 +1,23 @@
-
 from rest_framework import serializers
-
-class TranslationRequestSerializer(serializers.Serializer):
-    text = serializers.CharField(max_length=1000, required=True)
-    target_language = serializers.CharField(max_length=100, required=True)
-    source_language = serializers.CharField(max_length=100, required=False, allow_null=True)
 
 class TranslationResponseSerializer(serializers.Serializer):
     success = serializers.BooleanField()
     translated_text = serializers.CharField(allow_null=True)
     source_language = serializers.CharField(allow_null=True)
     target_language = serializers.CharField()
-    error = serializers.CharField(allow_null=True)
     same_language = serializers.BooleanField(required=False)
+    error = serializers.CharField(allow_null=True)
+    target_lang_code = serializers.CharField(allow_null=True)
 
-class LanguageSerializer(serializers.Serializer):
-    code = serializers.CharField()
-    name = serializers.CharField()
+class ChatRequestSerializer(serializers.Serializer):
+    input = serializers.CharField()  # No max_length to allow any size
 
-class SpecialCommandResponseSerializer(serializers.Serializer):
-    success = serializers.BooleanField()
-    response_type = serializers.CharField()
-    data = serializers.DictField(allow_null=True)
+class ChatResponseSerializer(serializers.Serializer):
+    is_translation_request = serializers.BooleanField()
+    text = serializers.CharField(allow_null=True)
+    target_language = serializers.CharField(allow_null=True)
+    conversational_response = serializers.CharField()
+    translation_result = TranslationResponseSerializer(required=False)
+
+class AllLanguagesResponseSerializer(serializers.Serializer):
+    translations = serializers.DictField(child=TranslationResponseSerializer())

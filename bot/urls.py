@@ -1,11 +1,7 @@
 from django.urls import path
-from .views import TranslateView, ParseTranslationRequestView, SupportedLanguagesView, ConversationHistoryView
-
-app_name = 'bot'
+from .views import ChatView, LanguagesView
 
 urlpatterns = [
-    path('translate/', TranslateView.as_view(), name='translate'),
-    path('parse/', ParseTranslationRequestView.as_view(), name='parse_translation'),
-    path('languages/', SupportedLanguagesView.as_view(), name='supported_languages'),
-    path('history/', ConversationHistoryView.as_view(), name='conversation_history'),
+    path('chat/', ChatView.as_view(), name='chat'),
+    path('languages/', LanguagesView.as_view(), name='languages'),
 ]

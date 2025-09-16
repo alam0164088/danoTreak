@@ -9,7 +9,7 @@ urlpatterns = [
     path('api/', include('authentication.urls')),
     path('api/payment/', include('payment.urls')),
     path('tts/', include('tts_app.urls')),
-    path('api/bot/', include('bot.urls')),
+    path('api/', include('bot.urls')),
     path('', home),
 ]
 
