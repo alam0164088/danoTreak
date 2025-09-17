@@ -10,6 +10,7 @@ urlpatterns = [
     path('api/payment/', include('payment.urls')),
     path('tts/', include('tts_app.urls')),
     path('api/', include('bot.urls')),
+    path('api/', include('dashboard.urls')),
     
     # 🔹 allauth routes add করুন
     path('accounts/', include('allauth.urls')),  

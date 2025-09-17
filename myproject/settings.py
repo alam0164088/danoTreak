@@ -56,6 +56,7 @@ INSTALLED_APPS = [
     "payment",
     "tts_app",
     "bot",
+    "dashboard",
 
     "rest_framework_simplejwt",   # যদি JWT ও রাখতে চান
 
@@ -64,6 +65,7 @@ INSTALLED_APPS = [
     "allauth.account",
     "allauth.socialaccount",
     "allauth.socialaccount.providers.google",
+    
 ]
 
 
