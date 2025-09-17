@@ -45,14 +45,27 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
-    "corsheaders",   # ✅ Added
+
+    "corsheaders",
     "rest_framework",
+    "rest_framework.authtoken",   # ✅ এটা অবশ্যই লাগবে
+    "dj_rest_auth",               # ✅ auth endpoints
+    "dj_rest_auth.registration",  # ✅ allauth এর সাথে registration
+
     "authentication",
     "payment",
     "tts_app",
     "bot",
-    "rest_framework_simplejwt",
+
+    "rest_framework_simplejwt",   # যদি JWT ও রাখতে চান
+
+    "django.contrib.sites",
+    "allauth",
+    "allauth.account",
+    "allauth.socialaccount",
+    "allauth.socialaccount.providers.google",
 ]
+
 
 # ------------------------------
 # Middleware
@@ -67,6 +80,7 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    "allauth.account.middleware.AccountMiddleware",  # ✅ Added for allauth
 ]
 
 # ------------------------------
@@ -87,7 +101,7 @@ TEMPLATES = [
         "OPTIONS": {
             "context_processors": [
                 "django.template.context_processors.debug",
-                "django.template.context_processors.request",
+                "django.template.context_processors.request",  # ✅ Required for allauth
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
             ],
@@ -160,6 +174,34 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # CORS Settings
 # ------------------------------
 CORS_ALLOW_ALL_ORIGINS = True   # ✅ Allow all origins (development use)
+
+# ------------------------------
+# django-allauth Settings
+# ------------------------------
+SITE_ID = 1  # ✅ Added, ensure a Site object exists with this ID
+SOCIALACCOUNT_PROVIDERS = {  # ✅ Added for Google login
+    'google': {
+        'APP': {
+            'client_id': env("GOOGLE_CLIENT_ID", default=""),
+            'secret': env("GOOGLE_SECRET", default=""),
+            'key': ''
+        },
+        'SCOPE': [
+            'profile',
+            'email',
+        ],
+        'AUTH_PARAMS': {
+            'access_type': 'online',
+            'prompt': 'select_account',
+        }
+    }
+}
+
+LOGIN_URL = 'login'  # ✅ Added
+LOGOUT_URL = 'logout'  # ✅ Added
+LOGIN_REDIRECT_URL = 'home'  # ✅ Added
+SOCIALACCOUNT_LOGIN_ON_GET = True  # ✅ Added
+
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
