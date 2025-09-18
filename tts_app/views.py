@@ -9,8 +9,6 @@ import os
 import uuid
 from django.conf import settings
 from django.http import HttpResponse
-from pydub import AudioSegment  # pip install pydub
-import io
 
 @method_decorator(csrf_exempt, name='dispatch')
 class TranslateAndTTSAPIView(APIView):
@@ -49,22 +47,9 @@ class TranslateAndTTSAPIView(APIView):
                 file_name = f"{uuid.uuid4()}_{lang_code}.mp3"
                 file_path = os.path.join(settings.MEDIA_ROOT, file_name)
 
-                # Step 1: gTTS generate
+                # Direct gTTS generate
                 tts = gTTS(text=translated_text, lang=lang_code, slow=False)
-                temp_fp = io.BytesIO()
-                tts.write_to_fp(temp_fp)
-                temp_fp.seek(0)
-
-                # Step 2: Load audio with pydub
-                audio = AudioSegment.from_file(temp_fp, format="mp3")
-
-                # Step 3: Lower pitch for male-like voice (same for all languages)
-                audio = audio._spawn(audio.raw_data, overrides={
-                    "frame_rate": int(audio.frame_rate * 0.85)  # lower pitch -> male
-                }).set_frame_rate(audio.frame_rate)
-
-                # Step 4: Export final
-                audio.export(file_path, format="mp3")
+                tts.save(file_path)
 
                 audio_url = request.build_absolute_uri(settings.MEDIA_URL + file_name)
             except Exception as e:
