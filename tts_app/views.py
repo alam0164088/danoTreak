@@ -8,8 +8,9 @@ import requests
 import os
 import uuid
 from django.conf import settings
-    
 from django.http import HttpResponse
+from pydub import AudioSegment  # pip install pydub
+import io
 
 @method_decorator(csrf_exempt, name='dispatch')
 class TranslateAndTTSAPIView(APIView):
@@ -18,7 +19,6 @@ class TranslateAndTTSAPIView(APIView):
 
     def post(self, request):
         text = request.data.get("text")
-        # "lang" অথবা "target_lang" দুইটাই support করা হলো
         lang_code = request.data.get("lang") or request.data.get("target_lang")
 
         if not text:
@@ -40,8 +40,7 @@ class TranslateAndTTSAPIView(APIView):
         except Exception as e:
             return Response({"error": f"Translation failed: {str(e)}"}, status=500)
 
-        # gTTS supported languages check
-        supported_langs = gtts_langs.tts_langs()  # dict of codes
+        supported_langs = gtts_langs.tts_langs()
         audio_url = "not found audio"
 
         if lang_code in supported_langs:
@@ -50,8 +49,22 @@ class TranslateAndTTSAPIView(APIView):
                 file_name = f"{uuid.uuid4()}_{lang_code}.mp3"
                 file_path = os.path.join(settings.MEDIA_ROOT, file_name)
 
+                # Step 1: gTTS generate
                 tts = gTTS(text=translated_text, lang=lang_code, slow=False)
-                tts.save(file_path)
+                temp_fp = io.BytesIO()
+                tts.write_to_fp(temp_fp)
+                temp_fp.seek(0)
+
+                # Step 2: Load audio with pydub
+                audio = AudioSegment.from_file(temp_fp, format="mp3")
+
+                # Step 3: Lower pitch for male-like voice (same for all languages)
+                audio = audio._spawn(audio.raw_data, overrides={
+                    "frame_rate": int(audio.frame_rate * 0.85)  # lower pitch -> male
+                }).set_frame_rate(audio.frame_rate)
+
+                # Step 4: Export final
+                audio.export(file_path, format="mp3")
 
                 audio_url = request.build_absolute_uri(settings.MEDIA_URL + file_name)
             except Exception as e:
@@ -66,4 +79,3 @@ class TranslateAndTTSAPIView(APIView):
 
 def home(request):
     return HttpResponse("Welcome to Help Me Speak")
-
