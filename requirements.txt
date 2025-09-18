@@ -16,6 +16,7 @@ gTTS==2.5.4
 gunicorn==23.0.0
 idna==3.10
 packaging==25.0
+pillow==11.3.0
 pycparser==2.23
 PyJWT==2.10.1
 python-dotenv==1.1.1
