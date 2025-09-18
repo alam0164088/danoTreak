@@ -24,7 +24,7 @@ class CategorySerializer(serializers.ModelSerializer):
 class CategoryNameSerializer(serializers.ModelSerializer):
     class Meta:
         model = Category
-        fields = ['id', 'name', 'icon']  # Returns id, name and icon
+        fields = ['id', 'name', 'icon']
 
     def validate_icon(self, value):
         if value and not value.startswith(('http://', 'https://')):
