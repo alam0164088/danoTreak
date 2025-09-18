@@ -84,7 +84,8 @@ class Profile(models.Model):
     phone = models.CharField(max_length=20, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-
+    image=models.ImageField(upload_to='profile_images/',
+     default='profile_images/default_profile.png',)
     def __str__(self):
         return f"Profile for {self.user.email}"
 

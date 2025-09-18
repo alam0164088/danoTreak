@@ -11,8 +11,8 @@ import jwt
 from datetime import timedelta
 import logging
 from uuid import uuid4
-from allauth.socialaccount.providers.google.views import GoogleOAuth2Adapter
-from dj_rest_auth.registration.views import SocialLoginView
+# from allauth.socialaccount.providers.google.views import GoogleOAuth2Adapter
+# from dj_rest_auth.registration.views import SocialLoginView
 
 from .models import Token, Profile, PasswordResetSession
 from .permissions import IsAdmin
@@ -21,7 +21,7 @@ from .serializers import (
     RefreshTokenSerializer, LogoutSerializer, ForgotPasswordSerializer,
     VerifyResetOTPSerializer, ResetPasswordSerializer, ChangePasswordSerializer,
     Enable2FASerializer, Verify2FASerializer, ResendOTPSerializer, UserProfileSerializer,
-    ProfileUpdateSerializer
+    ProfileUpdateSerializer,
 )
 
 logger = logging.getLogger(__name__)
@@ -182,42 +182,42 @@ class AdminUserManagementView(APIView):
         except User.DoesNotExist:
             return Response({"detail": "User not found."}, status=status.HTTP_404_NOT_FOUND)
 
-class GoogleLoginApi(SocialLoginView):
-    """Handle Google OAuth2 login and return JWT tokens."""
-    adapter_class = GoogleOAuth2Adapter
+# class GoogleLoginApi(SocialLoginView):
+#     """Handle Google OAuth2 login and return JWT tokens."""
+#     adapter_class = GoogleOAuth2Adapter
 
-    def post(self, request, *args, **kwargs):
-        serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        user = serializer.validated_data['user']
-        # Ensure user is active and verified if required
-        if not user.is_active or not user.is_email_verified:
-            user.is_active = True
-            user.is_email_verified = True
-            user.save()
-            logger.warning(f"Google login activated unverified user: {user.email}")
-        refresh = RefreshToken.for_user(user)
-        data = {
-            'access_token': str(refresh.access_token),
-            'refresh_token': str(refresh),
-            'user': {
-                'id': user.id,
-                'email': user.email,
-                'username': user.username,
-                'is_verified': user.is_verified
-            }
-        }
-        # Create token entry for tracking
-        Token.objects.create(
-            user=user,
-            email=user.email,
-            refresh_token=str(refresh),
-            access_token=str(refresh.access_token),
-            refresh_token_expires_at=timezone.now() + timedelta(days=30),
-            access_token_expires_at=timezone.now() + timedelta(minutes=15)
-        )
-        logger.info(f"User logged in via Google: {user.email}")
-        return Response(data, status=status.HTTP200_OK)
+#     def post(self, request, *args, **kwargs):
+#         serializer = self.get_serializer(data=request.data)
+#         serializer.is_valid(raise_exception=True)
+#         user = serializer.validated_data['user']
+#         # Ensure user is active and verified if required
+#         if not user.is_active or not user.is_email_verified:
+#             user.is_active = True
+#             user.is_email_verified = True
+#             user.save()
+#             logger.warning(f"Google login activated unverified user: {user.email}")
+#         refresh = RefreshToken.for_user(user)
+#         data = {
+#             'access_token': str(refresh.access_token),
+#             'refresh_token': str(refresh),
+#             'user': {
+#                 'id': user.id,
+#                 'email': user.email,
+#                 'username': user.username,
+#                 'is_verified': user.is_verified
+#             }
+#         }
+#         # Create token entry for tracking
+#         Token.objects.create(
+#             user=user,
+#             email=user.email,
+#             refresh_token=str(refresh),
+#             access_token=str(refresh.access_token),
+#             refresh_token_expires_at=timezone.now() + timedelta(days=30),
+#             access_token_expires_at=timezone.now() + timedelta(minutes=15)
+#         )
+#         logger.info(f"User logged in via Google: {user.email}")
+#         return Response(data, status=status.HTTP200_OK)
 
 class SendOTPView(APIView):
     """Send OTP for email verification, password reset, or 2FA."""
@@ -576,3 +576,29 @@ class ResendOTPView(APIView):
             logger.info(f"OTP resent for: {user.email}")
             return Response({"message": "Verification OTP resent. Expires in 5 minutes."}, status=status.HTTP_200_OK)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+
+from .serializers import UserSerializer
+from rest_framework import status, permissions
+
+class MeView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        serializer = UserProfileSerializer(request.user, context={'request': request})
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    def put(self, request):
+        profile, _ = Profile.objects.get_or_create(user=request.user)
+        serializer = ProfileUpdateSerializer(profile, data=request.data, context={'request': request}, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response({
+                "message": "Profile updated successfully.",
+                "user": UserProfileSerializer(request.user, context={'request': request}).data
+            }, status=status.HTTP_200_OK)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def patch(self, request):
+        # PUT এর মতোই কাজ করবে, partial update
+        return self.put(request)

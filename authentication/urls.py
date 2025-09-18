@@ -15,7 +15,7 @@ from .views import (
     Enable2FAView,
     Verify2FAView,
     MeView,
-    GoogleLoginApi,
+ 
 )
 
 urlpatterns = [
@@ -29,7 +29,7 @@ urlpatterns = [
     path('auth/login/', LoginView.as_view(), name='login'),
     path('auth/token/refresh/', RefreshTokenView.as_view(), name='refresh-token'),
     path('auth/logout/', LogoutView.as_view(), name='logout'),
-   path('auth/login/google/', GoogleLoginApi.as_view(), name='google_login'),  # Updated path
+    # path('auth/login/google/', GoogleLoginApi.as_view(), name='google_login'),  # Updated path
 
     # 🔹 Password Management
     path('auth/password/forgot/', ForgotPasswordView.as_view(), name='forgot-password'),

@@ -99,36 +99,81 @@ class Enable2FASerializer(serializers.Serializer):
 class ResendOTPSerializer(serializers.Serializer):
     email = serializers.EmailField()
     purpose = serializers.ChoiceField(choices=['email_verification'])
-
+# serializers.py
 class UserProfileSerializer(serializers.ModelSerializer):
     email_verified = serializers.BooleanField(source='is_email_verified', read_only=True)
+    profile_image = serializers.SerializerMethodField()  # নতুন ফিল্ড
 
     class Meta:
         model = User
-        fields = ['id', 'email', 'full_name', 'gender', 'email_verified', 'created_at', 'role']
+        fields = ['id', 'email', 'full_name', 'gender', 'email_verified', 'created_at', 'role', 'profile_image']
         read_only_fields = ['id', 'email', 'created_at', 'role']
+
+    def get_profile_image(self, obj):
+        try:
+            profile = obj.profile
+            if profile.image:
+                return self.context['request'].build_absolute_uri(profile.image.url)
+        except Profile.DoesNotExist:
+            pass
+        return self.context['request'].build_absolute_uri('/media/profile_images/default_profile.png')
 
 class ProfileUpdateSerializer(serializers.ModelSerializer):
     full_name = serializers.CharField(source='user.full_name', required=False)
     gender = serializers.CharField(source='user.gender', required=False)
+    image = serializers.SerializerMethodField()
 
     class Meta:
         model = Profile
-        fields = ['full_name', 'phone', 'gender']
+        fields = ['full_name', 'phone', 'gender', 'image']
+
+    def get_image(self, obj):
+        request = self.context.get('request')
+        if obj.image:
+            return request.build_absolute_uri(obj.image.url) if request else obj.image.url
+        default_url = '/media/profile_images/default_profile.png'
+        return request.build_absolute_uri(default_url) if request else default_url
 
     def update(self, instance, validated_data):
-        # Update User fields
         user_data = validated_data.pop('user', {})
-        if 'full_name' in user_data:
-            instance.user.full_name = user_data['full_name']
-        if 'gender' in user_data:
-            instance.user.gender = user_data['gender']
+        full_name = user_data.get('full_name')
+        gender = user_data.get('gender')
+
+        if full_name:
+            instance.user.full_name = full_name
+        if gender:
+            instance.user.gender = gender
         instance.user.save()
 
-        # Update Profile fields
-        return super().update(instance, validated_data)
+        # Profile এর নিজের ফিল্ড update
+        instance.phone = validated_data.get('phone', instance.phone)
+        instance.save()
+        return instance
+
+
 
 class SubscriptionPlanSerializer(serializers.ModelSerializer):
     class Meta:
         model = SubscriptionPlan
         fields = ['id', 'name', 'price']
+
+
+
+class UserSerializer(serializers.ModelSerializer):
+    email_verified = serializers.BooleanField(source='is_email_verified', read_only=True)
+    profile_image = serializers.SerializerMethodField()
+
+    class Meta:
+        model = User
+        fields = ['id', 'email', 'full_name', 'gender', 'email_verified', 'created_at', 'role', 'profile_image']
+        read_only_fields = ['id', 'email', 'created_at', 'role', 'email_verified']
+
+    def get_profile_image(self, obj):
+        try:
+            profile = obj.profile
+            if profile.image:
+                return self.context['request'].build_absolute_uri(profile.image.url)
+        except Profile.DoesNotExist:
+            pass
+        return self.context['request'].build_absolute_uri('/media/profile_images/default_profile.png')
+
