@@ -18,6 +18,7 @@ idna==3.10
 packaging==25.0
 pillow==11.3.0
 pycparser==2.23
+pydub==0.25.1
 PyJWT==2.10.1
 python-dotenv==1.1.1
 requests==2.32.5
