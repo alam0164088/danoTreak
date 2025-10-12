@@ -7,3 +7,7 @@ class IsAdmin(permissions.BasePermission):
 class IsUser(permissions.BasePermission):
     def has_permission(self, request, view):
         return request.user.is_authenticated and request.user.role == 'user'
+
+class IsVendor(permissions.BasePermission):
+    def has_permission(self, request, view):
+        return request.user.is_authenticated and request.user.role == 'vendor'

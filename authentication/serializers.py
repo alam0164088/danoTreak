@@ -1,5 +1,6 @@
+
 from rest_framework import serializers
-from .models import User, SubscriptionPlan, Profile
+from .models import User, SubscriptionPlan, Profile, Vendor, LoyaltyProgram, Visit, Redemption
 import re
 from django.utils import timezone
 from datetime import timedelta
@@ -8,11 +9,13 @@ class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, min_length=8)
     password_confirm = serializers.CharField(write_only=True, min_length=8)
     send_verification_otp = serializers.BooleanField(default=True)
+    role = serializers.ChoiceField(choices=User.ROLE_CHOICES, default='user', required=False)
 
     class Meta:
         model = User
-        fields = ['email', 'password', 'password_confirm', 'full_name', 'send_verification_otp']
+        fields = ['email', 'password', 'password_confirm', 'full_name', 'send_verification_otp', 'role']
 
+        
     def validate(self, data):
         if data['password'] != data['password_confirm']:
             raise serializers.ValidationError({"password": "Passwords do not match."})
@@ -20,6 +23,10 @@ class RegisterSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({
                 "password": "Password must be at least 8 characters long and contain letters, numbers, and special characters."
             })
+        if data.get('role') in ['admin', 'vendor'] and not self.context['request'].user.is_authenticated:
+            raise serializers.ValidationError({"role": "Only authenticated admins can assign 'admin' or 'vendor' roles."})
+        if data.get('role') in ['admin', 'vendor'] and self.context['request'].user.role != 'admin':
+            raise serializers.ValidationError({"role": "Only admins can assign 'admin' or 'vendor' roles."})
         return data
 
     def create(self, validated_data):
@@ -30,7 +37,7 @@ class RegisterSerializer(serializers.ModelSerializer):
             email=validated_data['email'],
             password=validated_data['password'],
             full_name=validated_data['full_name'],
-            role='user'
+            role=validated_data.get('role', 'user')
         )
         return user
 
@@ -94,15 +101,15 @@ class ChangePasswordSerializer(serializers.Serializer):
         return data
 
 class Enable2FASerializer(serializers.Serializer):
-    method = serializers.ChoiceField(choices=['email', 'auth_app', 'sms'])
+    method = serializers.ChoiceField(choices=['email'])
 
 class ResendOTPSerializer(serializers.Serializer):
     email = serializers.EmailField()
     purpose = serializers.ChoiceField(choices=['email_verification'])
-# serializers.py
+
 class UserProfileSerializer(serializers.ModelSerializer):
     email_verified = serializers.BooleanField(source='is_email_verified', read_only=True)
-    profile_image = serializers.SerializerMethodField()  # নতুন ফিল্ড
+    profile_image = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -144,20 +151,14 @@ class ProfileUpdateSerializer(serializers.ModelSerializer):
         if gender:
             instance.user.gender = gender
         instance.user.save()
-
-        # Profile এর নিজের ফিল্ড update
         instance.phone = validated_data.get('phone', instance.phone)
         instance.save()
         return instance
-
-
 
 class SubscriptionPlanSerializer(serializers.ModelSerializer):
     class Meta:
         model = SubscriptionPlan
         fields = ['id', 'name', 'price']
-
-
 
 class UserSerializer(serializers.ModelSerializer):
     email_verified = serializers.BooleanField(source='is_email_verified', read_only=True)
@@ -177,3 +178,44 @@ class UserSerializer(serializers.ModelSerializer):
             pass
         return self.context['request'].build_absolute_uri('/media/profile_images/default_profile.png')
 
+class VendorSerializer(serializers.ModelSerializer):
+    user = serializers.PrimaryKeyRelatedField(read_only=True)
+
+    class Meta:
+        model = Vendor
+        fields = ['id', 'user', 'business_name', 'location', 'geofence_radius', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'user', 'created_at', 'updated_at']
+
+class LoyaltyProgramSerializer(serializers.ModelSerializer):
+    vendor = serializers.PrimaryKeyRelatedField(read_only=True)
+
+    class Meta:
+        model = LoyaltyProgram
+        fields = ['id', 'vendor', 'campaign_name', 'visits_required', 'reward_description', 
+                  'max_redemptions_per_day', 'valid_until', 'cooldown_period', 'is_active', 'created_at']
+        read_only_fields = ['id', 'vendor', 'created_at']
+
+    def validate(self, data):
+        if data['valid_until'] < timezone.now():
+            raise serializers.ValidationError({"valid_until": "Valid until date must be in the future."})
+        if data['visits_required'] <= 0:
+            raise serializers.ValidationError({"visits_required": "Visits required must be greater than 0."})
+        return data
+
+class VisitSerializer(serializers.ModelSerializer):
+    user = serializers.PrimaryKeyRelatedField(read_only=True)
+    vendor = serializers.PrimaryKeyRelatedField(read_only=True)
+
+    class Meta:
+        model = Visit
+        fields = ['id', 'user', 'vendor', 'timestamp', 'duration', 'is_valid']
+        read_only_fields = ['id', 'user', 'vendor', 'timestamp', 'is_valid']
+
+class RedemptionSerializer(serializers.ModelSerializer):
+    user = serializers.PrimaryKeyRelatedField(read_only=True)
+    loyalty_program = serializers.PrimaryKeyRelatedField(read_only=True)
+
+    class Meta:
+        model = Redemption
+        fields = ['id', 'user', 'loyalty_program', 'timestamp', 'location_verified', 'fraud_flagged']
+        read_only_fields = ['id', 'user', 'loyalty_program', 'timestamp']
