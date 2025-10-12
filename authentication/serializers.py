@@ -1,4 +1,3 @@
-
 from rest_framework import serializers
 from .models import User, SubscriptionPlan, Profile, Vendor, LoyaltyProgram, Visit, Redemption
 import re
@@ -15,7 +14,6 @@ class RegisterSerializer(serializers.ModelSerializer):
         model = User
         fields = ['email', 'password', 'password_confirm', 'full_name', 'send_verification_otp', 'role']
 
-        
     def validate(self, data):
         if data['password'] != data['password_confirm']:
             raise serializers.ValidationError({"password": "Passwords do not match."})
@@ -33,7 +31,7 @@ class RegisterSerializer(serializers.ModelSerializer):
         validated_data.pop('password_confirm')
         validated_data.pop('send_verification_otp')
         user = User.objects.create_user(
-            username=validated_data['email'],
+            username=validated_data['email'],  # Set username to email
             email=validated_data['email'],
             password=validated_data['password'],
             full_name=validated_data['full_name'],
@@ -128,18 +126,11 @@ class UserProfileSerializer(serializers.ModelSerializer):
 class ProfileUpdateSerializer(serializers.ModelSerializer):
     full_name = serializers.CharField(source='user.full_name', required=False)
     gender = serializers.CharField(source='user.gender', required=False)
-    image = serializers.SerializerMethodField()
+    image = serializers.ImageField(required=False)  # Added for image uploads
 
     class Meta:
         model = Profile
         fields = ['full_name', 'phone', 'gender', 'image']
-
-    def get_image(self, obj):
-        request = self.context.get('request')
-        if obj.image:
-            return request.build_absolute_uri(obj.image.url) if request else obj.image.url
-        default_url = '/media/profile_images/default_profile.png'
-        return request.build_absolute_uri(default_url) if request else default_url
 
     def update(self, instance, validated_data):
         user_data = validated_data.pop('user', {})
@@ -152,6 +143,7 @@ class ProfileUpdateSerializer(serializers.ModelSerializer):
             instance.user.gender = gender
         instance.user.save()
         instance.phone = validated_data.get('phone', instance.phone)
+        instance.image = validated_data.get('image', instance.image)
         instance.save()
         return instance
 
@@ -196,11 +188,19 @@ class LoyaltyProgramSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'vendor', 'created_at']
 
     def validate(self, data):
-        if data['valid_until'] < timezone.now():
-            raise serializers.ValidationError({"valid_until": "Valid until date must be in the future."})
-        if data['visits_required'] <= 0:
-            raise serializers.ValidationError({"visits_required": "Visits required must be greater than 0."})
+        if data.get('visits_required') <= 0:
+            raise serializers.ValidationError({"visits_required": "Must be a positive integer."})
+        if data.get('max_redemptions_per_day') < 0:
+            raise serializers.ValidationError({"max_redemptions_per_day": "Cannot be negative."})
+        if data.get('cooldown_period') < 0:
+            raise serializers.ValidationError({"cooldown_period": "Cannot be negative."})
+        if data.get('valid_until') <= timezone.now():
+            raise serializers.ValidationError({"valid_until": "Must be a future date."})
         return data
+
+    def create(self, validated_data):
+        vendor = self.context['request'].user.vendor  # Use authenticated vendor
+        return LoyaltyProgram.objects.create(vendor=vendor, **validated_data)
 
 class VisitSerializer(serializers.ModelSerializer):
     user = serializers.PrimaryKeyRelatedField(read_only=True)
