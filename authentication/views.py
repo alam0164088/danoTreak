@@ -1,3 +1,4 @@
+
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
@@ -11,17 +12,16 @@ import jwt
 from datetime import timedelta
 import logging
 from uuid import uuid4
-# from allauth.socialaccount.providers.google.views import GoogleOAuth2Adapter
-# from dj_rest_auth.registration.views import SocialLoginView
+from django.db import models
 
-from .models import Token, Profile, PasswordResetSession
-from .permissions import IsAdmin
+from .models import Token, Profile, PasswordResetSession, Vendor, LoyaltyProgram, Visit, Redemption
+from .permissions import IsAdmin, IsVendor
 from .serializers import (
     RegisterSerializer, SendOTPSerializer, VerifyOTPSerializer, LoginSerializer,
     RefreshTokenSerializer, LogoutSerializer, ForgotPasswordSerializer,
     VerifyResetOTPSerializer, ResetPasswordSerializer, ChangePasswordSerializer,
     Enable2FASerializer, Verify2FASerializer, ResendOTPSerializer, UserProfileSerializer,
-    ProfileUpdateSerializer,
+    ProfileUpdateSerializer, VendorSerializer, LoyaltyProgramSerializer, VisitSerializer, RedemptionSerializer,
 )
 
 logger = logging.getLogger(__name__)
@@ -45,7 +45,7 @@ class RegisterView(APIView):
                     [user.email],
                     fail_silently=False,
                 )
-                user.is_active = False  # Inactive until verified
+                user.is_active = False
                 user.save()
                 logger.info(f"User registered: {user.email} (verification pending)")
                 return Response({
@@ -65,6 +65,42 @@ class RegisterView(APIView):
                     "is_active": True,
                     "message": "User created successfully."
                 }, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+class VendorSignUpView(APIView):
+    """Handle vendor signup by an existing admin."""
+    permission_classes = [IsAuthenticated, IsAdmin]
+
+    def post(self, request):
+        serializer = RegisterSerializer(data=request.data)
+        if serializer.is_valid():
+            user = serializer.save()
+            user.role = 'vendor'
+            user.is_active = False
+            user.save()
+            vendor_data = {
+                'business_name': request.data.get('business_name'),
+                'location': request.data.get('location'),
+                'geofence_radius': request.data.get('geofence_radius', 100.0)
+            }
+            vendor_serializer = VendorSerializer(data=vendor_data)
+            if vendor_serializer.is_valid():
+                vendor_serializer.save(user=user)
+                code = user.generate_email_verification_code()
+                send_mail(
+                    'Verify Your Vendor Email',
+                    f'Your verification code is {code}. Expires in 5 minutes.',
+                    settings.DEFAULT_FROM_EMAIL,
+                    [user.email],
+                    fail_silently=False,
+                )
+                logger.info(f"Vendor created by {request.user.email}: {user.email}")
+                return Response({
+                    "id": user.id,
+                    "email": user.email,
+                    "message": "Vendor created. Verification OTP sent to email."
+                }, status=status.HTTP_201_CREATED)
+            return Response(vendor_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 class InitialAdminSignUpView(APIView):
@@ -147,14 +183,14 @@ class AdminUserManagementView(APIView):
         if user_id:
             try:
                 user = User.objects.get(id=user_id)
-                serializer = UserProfileSerializer(user)
+                serializer = UserProfileSerializer(user, context={'request': request})
                 logger.info(f"User {user.email} viewed by {request.user.email}")
                 return Response(serializer.data, status=status.HTTP_200_OK)
             except User.DoesNotExist:
                 return Response({"detail": "User not found."}, status=status.HTTP_404_NOT_FOUND)
         else:
             users = User.objects.all()
-            serializer = UserProfileSerializer(users, many=True)
+            serializer = UserProfileSerializer(users, many=True, context={'request': request})
             logger.info(f"User list accessed by: {request.user.email}")
             return Response({"users": serializer.data}, status=status.HTTP_200_OK)
 
@@ -162,11 +198,11 @@ class AdminUserManagementView(APIView):
         try:
             user = User.objects.get(id=user_id)
             role = request.data.get('role')
-            if role not in ['admin', 'user']:
-                return Response({"detail": "Invalid role. Must be 'admin' or 'user'."}, status=status.HTTP_400_BAD_REQUEST)
+            if role not in ['admin', 'user', 'vendor']:
+                return Response({"detail": "Invalid role. Must be 'admin', 'user', or 'vendor'."}, status=status.HTTP_400_BAD_REQUEST)
             user.role = role
             user.save()
-            serializer = UserProfileSerializer(user)
+            serializer = UserProfileSerializer(user, context={'request': request})
             logger.info(f"User {user.email} role updated to {role} by {request.user.email}")
             return Response({"message": "User role updated successfully.", "user": serializer.data}, status=status.HTTP_200_OK)
         except User.DoesNotExist:
@@ -182,42 +218,117 @@ class AdminUserManagementView(APIView):
         except User.DoesNotExist:
             return Response({"detail": "User not found."}, status=status.HTTP_404_NOT_FOUND)
 
-# class GoogleLoginApi(SocialLoginView):
-#     """Handle Google OAuth2 login and return JWT tokens."""
-#     adapter_class = GoogleOAuth2Adapter
+class VendorDashboardView(APIView):
+    """Handle vendor dashboard access with real-time statistics."""
+    permission_classes = [IsAuthenticated, IsVendor]
 
-#     def post(self, request, *args, **kwargs):
-#         serializer = self.get_serializer(data=request.data)
-#         serializer.is_valid(raise_exception=True)
-#         user = serializer.validated_data['user']
-#         # Ensure user is active and verified if required
-#         if not user.is_active or not user.is_email_verified:
-#             user.is_active = True
-#             user.is_email_verified = True
-#             user.save()
-#             logger.warning(f"Google login activated unverified user: {user.email}")
-#         refresh = RefreshToken.for_user(user)
-#         data = {
-#             'access_token': str(refresh.access_token),
-#             'refresh_token': str(refresh),
-#             'user': {
-#                 'id': user.id,
-#                 'email': user.email,
-#                 'username': user.username,
-#                 'is_verified': user.is_verified
-#             }
-#         }
-#         # Create token entry for tracking
-#         Token.objects.create(
-#             user=user,
-#             email=user.email,
-#             refresh_token=str(refresh),
-#             access_token=str(refresh.access_token),
-#             refresh_token_expires_at=timezone.now() + timedelta(days=30),
-#             access_token_expires_at=timezone.now() + timedelta(minutes=15)
-#         )
-#         logger.info(f"User logged in via Google: {user.email}")
-#         return Response(data, status=status.HTTP200_OK)
+    def get(self, request):
+        user = request.user
+        try:
+            vendor = Vendor.objects.get(user=user)
+        except Vendor.DoesNotExist:
+            return Response({"detail": "Vendor profile not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        visits = Visit.objects.filter(vendor=vendor)
+        redemptions = Redemption.objects.filter(loyalty_program__vendor=vendor)
+        total_visits = visits.count()
+        total_redemptions = redemptions.count()
+        avg_redemption_value = redemptions.aggregate(models.Avg('loyalty_program__max_redemptions_per_day'))['loyalty_program__max_redemptions_per_day__avg'] or 0
+        top_users = visits.values('user__email').annotate(total_visits=models.Count('id')).order_by('-total_visits')[:5]
+
+        serializer = UserProfileSerializer(user, context={'request': request})
+        return Response({
+            "message": "Vendor dashboard accessed successfully.",
+            "user": serializer.data,
+            "stats": {
+                "total_visits": total_visits,
+                "total_redemptions": total_redemptions,
+                "avg_redemption_value": avg_redemption_value,
+                "top_users": top_users
+            }
+        }, status=status.HTTP_200_OK)
+
+class LoyaltyProgramView(APIView):
+    """Handle loyalty program creation, update, and retrieval."""
+    permission_classes = [IsAuthenticated, IsVendor]
+
+    def get(self, request, program_id=None):
+        try:
+            vendor = Vendor.objects.get(user=request.user)
+        except Vendor.DoesNotExist:
+            return Response({"detail": "Vendor profile not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if program_id:
+            try:
+                program = LoyaltyProgram.objects.get(id=program_id, vendor=vendor)
+                serializer = LoyaltyProgramSerializer(program)
+                return Response(serializer.data, status=status.HTTP_200_OK)
+            except LoyaltyProgram.DoesNotExist:
+                return Response({"detail": "Loyalty program not found."}, status=status.HTTP_404_NOT_FOUND)
+        else:
+            programs = LoyaltyProgram.objects.filter(vendor=vendor)
+            serializer = LoyaltyProgramSerializer(programs, many=True)
+            return Response({"programs": serializer.data}, status=status.HTTP_200_OK)
+
+    def post(self, request):
+        try:
+            vendor = Vendor.objects.get(user=request.user)
+        except Vendor.DoesNotExist:
+            return Response({"detail": "Vendor profile not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        data = request.data.copy()
+        data['vendor'] = vendor.id
+        serializer = LoyaltyProgramSerializer(data=data)
+        if serializer.is_valid():
+            serializer.save()
+            logger.info(f"Loyalty program created by {request.user.email}: {serializer.data['campaign_name']}")
+            return Response({"message": "Loyalty program created successfully.", "program": serializer.data}, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def put(self, request, program_id):
+        try:
+            vendor = Vendor.objects.get(user=request.user)
+            program = LoyaltyProgram.objects.get(id=program_id, vendor=vendor)
+        except Vendor.DoesNotExist:
+            return Response({"detail": "Vendor profile not found."}, status=status.HTTP_404_NOT_FOUND)
+        except LoyaltyProgram.DoesNotExist:
+            return Response({"detail": "Loyalty program not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = LoyaltyProgramSerializer(program, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            logger.info(f"Loyalty program updated by {request.user.email}: {program.campaign_name}")
+            return Response({"message": "Loyalty program updated successfully.", "program": serializer.data}, status=status.HTTP_200_OK)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+class RedemptionView(APIView):
+    """Handle redemption log and fraud flagging."""
+    permission_classes = [IsAuthenticated, IsVendor]
+
+    def get(self, request):
+        try:
+            vendor = Vendor.objects.get(user=request.user)
+        except Vendor.DoesNotExist:
+            return Response({"detail": "Vendor profile not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        redemptions = Redemption.objects.filter(loyalty_program__vendor=vendor)
+        serializer = RedemptionSerializer(redemptions, many=True)
+        return Response({"redemptions": serializer.data}, status=status.HTTP_200_OK)
+
+    def post(self, request, redemption_id):
+        try:
+            vendor = Vendor.objects.get(user=request.user)
+            redemption = Redemption.objects.get(id=redemption_id, loyalty_program__vendor=vendor)
+        except Vendor.DoesNotExist:
+            return Response({"detail": "Vendor profile not found."}, status=status.HTTP_404_NOT_FOUND)
+        except Redemption.DoesNotExist:
+            return Response({"detail": "Redemption not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        fraud_flagged = request.data.get('fraud_flagged', False)
+        redemption.fraud_flagged = fraud_flagged
+        redemption.save()
+        logger.info(f"Redemption {redemption_id} fraud flag updated by {request.user.email}: {fraud_flagged}")
+        return Response({"message": "Fraud flag updated successfully."}, status=status.HTTP_200_OK)
 
 class SendOTPView(APIView):
     """Send OTP for email verification, password reset, or 2FA."""
@@ -532,16 +643,22 @@ class MeView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        serializer = UserProfileSerializer(request.user)
+        serializer = UserProfileSerializer(request.user, context={'request': request})
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     def put(self, request):
         profile, _ = Profile.objects.get_or_create(user=request.user)
-        serializer = ProfileUpdateSerializer(profile, data=request.data, partial=True)
+        serializer = ProfileUpdateSerializer(profile, data=request.data, context={'request': request}, partial=True)
         if serializer.is_valid():
             serializer.save()
-            return Response({"message": "Profile updated.", "user": UserProfileSerializer(request.user).data}, status=status.HTTP_200_OK)
+            return Response({
+                "message": "Profile updated successfully.",
+                "user": UserProfileSerializer(request.user, context={'request': request}).data
+            }, status=status.HTTP_200_OK)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def patch(self, request):
+        return self.put(request)
 
     def delete(self, request):
         password = request.data.get('current_password')
@@ -578,27 +695,49 @@ class ResendOTPView(APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     
 
-from .serializers import UserSerializer
-from rest_framework import status, permissions
+from django.utils import timezone
+from django.http import JsonResponse
+from django.views.decorators.http import require_POST
+from django.views.decorators.csrf import csrf_exempt  # API হলে token/CSRF ভাবো
+from .models import EmailOTP
+from .utils import check_password  
+from .utils import check_password
 
-class MeView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
 
-    def get(self, request):
-        serializer = UserProfileSerializer(request.user, context={'request': request})
-        return Response(serializer.data, status=status.HTTP_200_OK)
+@require_POST
+@csrf_exempt
+def verify_otp(request):
+    # আশা করছি JSON body: {"email": "...", "otp": "123456"}
+    import json
+    data = json.loads(request.body)
+    email = data.get('email')
+    otp = data.get('otp')
+    if not email or not otp:
+        return JsonResponse({'ok': False, 'error': 'email and otp required'}, status=400)
 
-    def put(self, request):
-        profile, _ = Profile.objects.get_or_create(user=request.user)
-        serializer = ProfileUpdateSerializer(profile, data=request.data, context={'request': request}, partial=True)
-        if serializer.is_valid():
-            serializer.save()
-            return Response({
-                "message": "Profile updated successfully.",
-                "user": UserProfileSerializer(request.user, context={'request': request}).data
-            }, status=status.HTTP_200_OK)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    # সবথেকে নতুন, unused OTP নাও (ভুল হলে attempts বাড়াও)
+    try:
+        record = EmailOTP.objects.filter(email=email, used=False).order_by('-created_at').first()
+    except EmailOTP.DoesNotExist:
+        record = None
 
-    def patch(self, request):
-        # PUT এর মতোই কাজ করবে, partial update
-        return self.put(request)
+    if not record:
+        return JsonResponse({'ok': False, 'error': 'No OTP found, request again'}, status=404)
+
+    if record.is_expired():
+        return JsonResponse({'ok': False, 'error': 'OTP expired'}, status=400)
+
+    if record.attempts >= MAX_ATTEMPTS:
+        return JsonResponse({'ok': False, 'error': 'Too many attempts'}, status=403)
+
+    # check_password from django.contrib.auth.hashers
+    from django.contrib.auth.hashers import check_password
+    if check_password(otp, record.otp_hash):
+        record.used = True
+        record.save(update_fields=['used'])
+        return JsonResponse({'ok': True, 'message': 'OTP verified'})
+    else:
+        # increase attempts
+        record.attempts += 1
+        record.save(update_fields=['attempts'])
+        return JsonResponse({'ok': False, 'error': 'Invalid OTP', 'attempts_left': MAX_ATTEMPTS - record.attempts}, status=400)

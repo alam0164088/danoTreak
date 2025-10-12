@@ -53,10 +53,7 @@ INSTALLED_APPS = [
     "dj_rest_auth.registration",  # ✅ allauth এর সাথে registration
 
     "authentication",
-    "payment",
-    "tts_app",
-    "bot",
-    "dashboard",
+    
 
     "rest_framework_simplejwt",   # যদি JWT ও রাখতে চান
 
@@ -115,11 +112,17 @@ TEMPLATES = [
 # Database
 # ------------------------------
 DATABASES = {
-    "default": dj_database_url.config(
-        default=env("DATABASE_URL", default=f"sqlite:///{BASE_DIR / 'db.sqlite3'}"),
-        conn_max_age=600,
-    )
+    'default': {
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': 'postgres',  # অথবা তোমার নিজের ডাটাবেস নাম
+        'USER': 'Nazmul13',
+        'PASSWORD': 'nazmul13',
+        'HOST': '127.0.0.1',
+        'PORT': '5432',
+    }
 }
+
+
 
 # ------------------------------
 # REST Framework
