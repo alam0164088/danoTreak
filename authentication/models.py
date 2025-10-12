@@ -22,15 +22,16 @@ class User(AbstractUser):
     gender = models.CharField(max_length=10, blank=True, choices=[('male', 'Male'), ('female', 'Female'), ('other', 'Other')])
     is_2fa_enabled = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
-    
+    otp_attempts = models.PositiveIntegerField(default=0)  # Added for OTP attempt tracking
+
     USERNAME_FIELD = 'email'
-    REQUIRED_FIELDS = ['username']
+    REQUIRED_FIELDS = []  # Removed 'username'
 
     def __str__(self):
         return self.email
 
     def generate_email_verification_code(self):
-        from .utils import generate_otp  # utils থেকে generate_otp ইমপোর্ট করুন
+        from .utils import generate_otp
         code = generate_otp(self.email, save_raw=True, expiry_minutes=5)
         self.email_verification_code = code
         self.email_verification_code_expires_at = timezone.now() + timedelta(minutes=5)
@@ -44,18 +45,6 @@ class User(AbstractUser):
         self.password_reset_code_expires_at = timezone.now() + timedelta(minutes=15)
         self.save(update_fields=['password_reset_code', 'password_reset_code_expires_at'])
         return code
-
-class EmailOTP(models.Model):
-    email = models.EmailField()
-    otp_hash = models.CharField(max_length=64)
-    raw_otp = models.CharField(max_length=6, null=True, blank=True)
-    expires_at = models.DateTimeField()
-    created_at = models.DateTimeField(auto_now_add=True)
-    used = models.BooleanField(default=False)  # নতুন ফিল্ড যোগ করুন
-    attempts = models.PositiveIntegerField(default=0)  # নতুন ফিল্ড যোগ করুন
-
-    def __str__(self):
-        return f"OTP for {self.email}"
 
 class Token(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE)
@@ -106,7 +95,7 @@ class Profile(models.Model):
         super().save(*args, **kwargs)
 
 class Vendor(models.Model):
-    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='vendor_profile')
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='vendor')
     business_name = models.CharField(max_length=255)
     location = models.CharField(max_length=255)
     geofence_radius = models.FloatField(default=100.0)
@@ -149,3 +138,18 @@ class Redemption(models.Model):
 
     def __str__(self):
         return f"Redemption by {self.user.email} for {self.loyalty_program.campaign_name}"
+    
+
+
+
+class EmailOTP(models.Model):
+    email = models.EmailField()
+    otp_hash = models.CharField(max_length=64)
+    raw_otp = models.CharField(max_length=6, null=True, blank=True)
+    expires_at = models.DateTimeField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    used = models.BooleanField(default=False)  # OTP use হয়েছে কি না
+    attempts = models.PositiveIntegerField(default=0)  # OTP চেষ্টা সংখ্যা
+
+    def __str__(self):
+        return f"OTP for {self.email}"

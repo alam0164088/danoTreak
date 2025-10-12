@@ -1,4 +1,3 @@
-
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
@@ -24,7 +23,7 @@ from .serializers import (
     ProfileUpdateSerializer, VendorSerializer, LoyaltyProgramSerializer, VisitSerializer, RedemptionSerializer,
 )
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger('authentication')
 User = get_user_model()
 
 class RegisterView(APIView):
@@ -278,27 +277,11 @@ class LoyaltyProgramView(APIView):
 
         data = request.data.copy()
         data['vendor'] = vendor.id
-        serializer = LoyaltyProgramSerializer(data=data)
+        serializer = LoyaltyProgramSerializer(data=data, context={'request': request})
         if serializer.is_valid():
             serializer.save()
             logger.info(f"Loyalty program created by {request.user.email}: {serializer.data['campaign_name']}")
             return Response({"message": "Loyalty program created successfully.", "program": serializer.data}, status=status.HTTP_201_CREATED)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-    def put(self, request, program_id):
-        try:
-            vendor = Vendor.objects.get(user=request.user)
-            program = LoyaltyProgram.objects.get(id=program_id, vendor=vendor)
-        except Vendor.DoesNotExist:
-            return Response({"detail": "Vendor profile not found."}, status=status.HTTP_404_NOT_FOUND)
-        except LoyaltyProgram.DoesNotExist:
-            return Response({"detail": "Loyalty program not found."}, status=status.HTTP_404_NOT_FOUND)
-
-        serializer = LoyaltyProgramSerializer(program, data=request.data, partial=True)
-        if serializer.is_valid():
-            serializer.save()
-            logger.info(f"Loyalty program updated by {request.user.email}: {program.campaign_name}")
-            return Response({"message": "Loyalty program updated successfully.", "program": serializer.data}, status=status.HTTP_200_OK)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 class RedemptionView(APIView):
@@ -375,39 +358,59 @@ class VerifyOTPView(APIView):
             purpose = serializer.validated_data['purpose']
             user = User.objects.filter(email=email).first()
             if not user:
-                return Response({"detail": "Invalid OTP."}, status=status.HTTP_400_BAD_REQUEST)
+                return Response({"ok": False, "error": "Invalid OTP."}, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Track OTP attempts
+            MAX_ATTEMPTS = 3
             if purpose == 'email_verification':
                 if user.is_email_verified:
-                    return Response({"detail": "Email already verified."}, status=status.HTTP_400_BAD_REQUEST)
+                    return Response({"ok": False, "error": "Email already verified."}, status=status.HTTP_400_BAD_REQUEST)
+                if user.otp_attempts >= MAX_ATTEMPTS:
+                    return Response({"ok": False, "error": "Too many attempts"}, status=status.HTTP_403_FORBIDDEN)
                 if user.email_verification_code != otp or user.email_verification_code_expires_at < timezone.now():
-                    return Response({"detail": "OTP expired or invalid."}, status=status.HTTP_400_BAD_REQUEST)
+                    user.otp_attempts += 1
+                    user.save(update_fields=['otp_attempts'])
+                    return Response({"ok": False, "error": "OTP expired or invalid.", "attempts_left": MAX_ATTEMPTS - user.otp_attempts}, status=status.HTTP_400_BAD_REQUEST)
                 user.is_email_verified = True
                 user.is_active = True
                 user.email_verification_code = None
                 user.email_verification_code_expires_at = None
+                user.otp_attempts = 0
                 user.save()
                 logger.info(f"Email verified for: {user.email}")
-                return Response({"message": "Email verified successfully.", "email_verified": True}, status=status.HTTP_200_OK)
+                return Response({"ok": True, "message": "OTP verified"}, status=status.HTTP_200_OK)
+            
             elif purpose == 'password_reset':
+                if user.otp_attempts >= MAX_ATTEMPTS:
+                    return Response({"ok": False, "error": "Too many attempts"}, status=status.HTTP_403_FORBIDDEN)
                 if user.password_reset_code != otp or user.password_reset_code_expires_at < timezone.now():
-                    return Response({"detail": "OTP expired or invalid."}, status=status.HTTP_400_BAD_REQUEST)
+                    user.otp_attempts += 1
+                    user.save(update_fields=['otp_attempts'])
+                    return Response({"ok": False, "error": "OTP expired or invalid.", "attempts_left": MAX_ATTEMPTS - user.otp_attempts}, status=status.HTTP_400_BAD_REQUEST)
                 reset_token = str(uuid4())
                 PasswordResetSession.objects.create(user=user, token=reset_token)
                 user.password_reset_code = None
                 user.password_reset_code_expires_at = None
+                user.otp_attempts = 0
                 user.save()
                 logger.info(f"Password reset OTP verified for: {user.email}")
-                return Response({
-                    "message": "OTP verified. You may now reset your password.",
-                    "reset_token": reset_token
-                }, status=status.HTTP_200_OK)
+                return Response({"ok": True, "message": "OTP verified", "reset_token": reset_token}, status=status.HTTP_200_OK)
+            
             elif purpose == 'two_factor':
+                if user.otp_attempts >= MAX_ATTEMPTS:
+                    return Response({"ok": False, "error": "Too many attempts"}, status=status.HTTP_403_FORBIDDEN)
                 if user.email_verification_code != otp or user.email_verification_code_expires_at < timezone.now():
-                    return Response({"detail": "OTP expired or invalid."}, status=status.HTTP_400_BAD_REQUEST)
+                    user.otp_attempts += 1
+                    user.save(update_fields=['otp_attempts'])
+                    return Response({"ok": False, "error": "OTP expired or invalid.", "attempts_left": MAX_ATTEMPTS - user.otp_attempts}, status=status.HTTP_400_BAD_REQUEST)
+                user.otp_attempts = 0
+                user.save()
                 logger.info(f"2FA OTP verified for: {user.email}")
-                return Response({"message": "2FA OTP verified successfully."}, status=status.HTTP_200_OK)
-            return Response({"detail": "Invalid purpose."}, status=status.HTTP_400_BAD_REQUEST)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+                return Response({"ok": True, "message": "OTP verified"}, status=status.HTTP_200_OK)
+            
+            return Response({"ok": False, "error": "Invalid purpose."}, status=status.HTTP_400_BAD_REQUEST)
+        
+        return Response({"ok": False, "error": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
 class LoginView(APIView):
     """Handle user login with password and optional 2FA."""
@@ -693,51 +696,3 @@ class ResendOTPView(APIView):
             logger.info(f"OTP resent for: {user.email}")
             return Response({"message": "Verification OTP resent. Expires in 5 minutes."}, status=status.HTTP_200_OK)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-    
-
-from django.utils import timezone
-from django.http import JsonResponse
-from django.views.decorators.http import require_POST
-from django.views.decorators.csrf import csrf_exempt  # API হলে token/CSRF ভাবো
-from .models import EmailOTP
-from .utils import check_password  
-from .utils import check_password
-
-
-@require_POST
-@csrf_exempt
-def verify_otp(request):
-    # আশা করছি JSON body: {"email": "...", "otp": "123456"}
-    import json
-    data = json.loads(request.body)
-    email = data.get('email')
-    otp = data.get('otp')
-    if not email or not otp:
-        return JsonResponse({'ok': False, 'error': 'email and otp required'}, status=400)
-
-    # সবথেকে নতুন, unused OTP নাও (ভুল হলে attempts বাড়াও)
-    try:
-        record = EmailOTP.objects.filter(email=email, used=False).order_by('-created_at').first()
-    except EmailOTP.DoesNotExist:
-        record = None
-
-    if not record:
-        return JsonResponse({'ok': False, 'error': 'No OTP found, request again'}, status=404)
-
-    if record.is_expired():
-        return JsonResponse({'ok': False, 'error': 'OTP expired'}, status=400)
-
-    if record.attempts >= MAX_ATTEMPTS:
-        return JsonResponse({'ok': False, 'error': 'Too many attempts'}, status=403)
-
-    # check_password from django.contrib.auth.hashers
-    from django.contrib.auth.hashers import check_password
-    if check_password(otp, record.otp_hash):
-        record.used = True
-        record.save(update_fields=['used'])
-        return JsonResponse({'ok': True, 'message': 'OTP verified'})
-    else:
-        # increase attempts
-        record.attempts += 1
-        record.save(update_fields=['attempts'])
-        return JsonResponse({'ok': False, 'error': 'Invalid OTP', 'attempts_left': MAX_ATTEMPTS - record.attempts}, status=400)
