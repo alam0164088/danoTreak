@@ -183,8 +183,10 @@ CORS_ALLOW_ALL_ORIGINS = True   # ✅ Allow all origins (development use)
 # ------------------------------
 # django-allauth Settings
 # ------------------------------
-SITE_ID = 1  # ✅ Added, ensure a Site object exists with this ID
-SOCIALACCOUNT_PROVIDERS = {  # ✅ Added for Google login
+SITE_ID = 1  # ✅ Ensure a Site object exists with this ID
+
+SOCIALACCOUNT_PROVIDERS = {
+    # ✅ Google Login
     'google': {
         'APP': {
             'client_id': env("GOOGLE_CLIENT_ID", default=""),
@@ -199,21 +201,42 @@ SOCIALACCOUNT_PROVIDERS = {  # ✅ Added for Google login
             'access_type': 'online',
             'prompt': 'select_account',
         }
-    }
+    },
+
+    # ✅ Apple Login
+    'apple': {
+        'APP': {
+            'client_id': env("APPLE_CLIENT_ID", default=""),
+            'secret': env("APPLE_SECRET", default=""),
+            'key': env("APPLE_KEY", default=""),
+        },
+        'SCOPE': [
+            'name',
+            'email',
+        ],
+        'AUTH_PARAMS': {
+            'response_mode': 'form_post',
+            'response_type': 'code id_token',
+        },
+    },
 }
 
-LOGIN_URL = 'login'  # ✅ Added
-LOGOUT_URL = 'logout'  # ✅ Added
-LOGIN_REDIRECT_URL = 'home'  # ✅ Added
-SOCIALACCOUNT_LOGIN_ON_GET = True  # ✅ Added
+# ------------------------------
+# Authentication URLs
+# ------------------------------
+LOGIN_URL = 'login'
+LOGOUT_URL = 'logout'
+LOGIN_REDIRECT_URL = 'home'
+SOCIALACCOUNT_LOGIN_ON_GET = True
 
+# ------------------------------
+# Logging Settings
+# ------------------------------
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
     'handlers': {
-        'console': {
-            'class': 'logging.StreamHandler',
-        },
+        'console': {'class': 'logging.StreamHandler'},
     },
     'loggers': {
         '': {
@@ -222,3 +245,8 @@ LOGGING = {
         },
     },
 }
+
+# ------------------------------
+# Email Backend
+# ------------------------------
+EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
