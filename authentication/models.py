@@ -70,12 +70,6 @@ class PasswordResetSession(models.Model):
     def __str__(self):
         return f"Password Reset Session for {self.user.email}"
 
-class SubscriptionPlan(models.Model):
-    name = models.CharField(max_length=100)
-    price = models.DecimalField(max_digits=6, decimal_places=2)
-
-    def __str__(self):
-        return self.name
 
 class Profile(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
@@ -105,40 +99,7 @@ class Vendor(models.Model):
     def __str__(self):
         return f"{self.business_name} ({self.user.email})"
 
-class LoyaltyProgram(models.Model):
-    vendor = models.ForeignKey(Vendor, on_delete=models.CASCADE, related_name='loyalty_programs')
-    campaign_name = models.CharField(max_length=255)
-    visits_required = models.PositiveIntegerField()
-    reward_description = models.TextField()
-    max_redemptions_per_day = models.PositiveIntegerField(default=20)
-    valid_until = models.DateTimeField()
-    cooldown_period = models.PositiveIntegerField(default=0)
-    is_active = models.BooleanField(default=True)
-    created_at = models.DateTimeField(auto_now_add=True)
 
-    def __str__(self):
-        return f"{self.campaign_name} by {self.vendor.business_name}"
-
-class Visit(models.Model):
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='visits')
-    vendor = models.ForeignKey(Vendor, on_delete=models.CASCADE, related_name='visits')
-    timestamp = models.DateTimeField(auto_now_add=True)
-    duration = models.PositiveIntegerField()
-    is_valid = models.BooleanField(default=False)
-
-    def __str__(self):
-        return f"Visit by {self.user.email} to {self.vendor.business_name} at {self.timestamp}"
-
-class Redemption(models.Model):
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='redemptions')
-    loyalty_program = models.ForeignKey(LoyaltyProgram, on_delete=models.CASCADE, related_name='redemptions')
-    timestamp = models.DateTimeField(auto_now_add=True)
-    location_verified = models.BooleanField(default=False)
-    fraud_flagged = models.BooleanField(default=False)
-
-    def __str__(self):
-        return f"Redemption by {self.user.email} for {self.loyalty_program.campaign_name}"
-    
 
 
 

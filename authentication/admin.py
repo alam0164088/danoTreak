@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import User, Token, PasswordResetSession, SubscriptionPlan, Profile, Vendor, LoyaltyProgram, Visit, Redemption, EmailOTP
+from .models import User, Token, PasswordResetSession,  Profile, Vendor,EmailOTP
 
 @admin.register(User)
 class UserAdmin(admin.ModelAdmin):
@@ -18,10 +18,6 @@ class PasswordResetSessionAdmin(admin.ModelAdmin):
     list_display = ['user', 'token', 'created_at']
     search_fields = ['user__email']
 
-@admin.register(SubscriptionPlan)
-class SubscriptionPlanAdmin(admin.ModelAdmin):
-    list_display = ['name', 'price']
-    search_fields = ['name']
 
 @admin.register(Profile)
 class ProfileAdmin(admin.ModelAdmin):
@@ -33,23 +29,8 @@ class VendorAdmin(admin.ModelAdmin):
     list_display = ['user', 'business_name', 'location', 'geofence_radius', 'created_at']
     search_fields = ['user__email', 'business_name']
 
-@admin.register(LoyaltyProgram)
-class LoyaltyProgramAdmin(admin.ModelAdmin):
-    list_display = ['campaign_name', 'vendor', 'visits_required', 'is_active', 'valid_until', 'created_at']
-    list_filter = ['is_active']
-    search_fields = ['campaign_name', 'vendor__business_name']
 
-@admin.register(Visit)
-class VisitAdmin(admin.ModelAdmin):
-    list_display = ['user', 'vendor', 'timestamp', 'duration', 'is_valid']
-    list_filter = ['is_valid']
-    search_fields = ['user__email', 'vendor__business_name']
 
-@admin.register(Redemption)
-class RedemptionAdmin(admin.ModelAdmin):
-    list_display = ['user', 'loyalty_program', 'timestamp', 'location_verified', 'fraud_flagged']
-    list_filter = ['location_verified', 'fraud_flagged']
-    search_fields = ['user__email', 'loyalty_program__campaign_name']
 
 from django.contrib import admin
 from .models import EmailOTP

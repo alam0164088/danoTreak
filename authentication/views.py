@@ -7,29 +7,36 @@ from django.core.mail import send_mail
 from django.conf import settings
 from django.utils import timezone
 from django.contrib.auth import get_user_model
-import jwt
-from datetime import timedelta
+from django.views.decorators.cache import never_cache
+from django.utils.decorators import method_decorator
 import logging
 from uuid import uuid4
 from django.db import models
-
-from .models import Token, Profile, PasswordResetSession, Vendor, LoyaltyProgram, Visit, Redemption
+from rest_framework.decorators import api_view
+from jose import jwt
+import requests
+import os
+from datetime import timedelta
+from django.http import HttpResponseRedirect, JsonResponse
+from .models import Token, Profile, PasswordResetSession, Vendor
 from .permissions import IsAdmin, IsVendor
 from .serializers import (
     RegisterSerializer, SendOTPSerializer, VerifyOTPSerializer, LoginSerializer,
     RefreshTokenSerializer, LogoutSerializer, ForgotPasswordSerializer,
     VerifyResetOTPSerializer, ResetPasswordSerializer, ChangePasswordSerializer,
     Enable2FASerializer, Verify2FASerializer, ResendOTPSerializer, UserProfileSerializer,
-    ProfileUpdateSerializer, VendorSerializer, LoyaltyProgramSerializer, VisitSerializer, RedemptionSerializer,
+    ProfileUpdateSerializer, VendorSerializer
 )
 
 logger = logging.getLogger('authentication')
 User = get_user_model()
 
+# Remove load_dotenv() from here; it should be in settings.py
+# load_dotenv()
+
 class RegisterView(APIView):
     """Handle user registration with optional email verification OTP."""
     permission_classes = [AllowAny]
-
     def post(self, request):
         serializer = RegisterSerializer(data=request.data)
         if serializer.is_valid():
@@ -69,7 +76,6 @@ class RegisterView(APIView):
 class VendorSignUpView(APIView):
     """Handle vendor signup by an existing admin."""
     permission_classes = [IsAuthenticated, IsAdmin]
-
     def post(self, request):
         serializer = RegisterSerializer(data=request.data)
         if serializer.is_valid():
@@ -105,7 +111,6 @@ class VendorSignUpView(APIView):
 class InitialAdminSignUpView(APIView):
     """Handle initial admin signup (only one admin allowed initially)."""
     permission_classes = [AllowAny]
-
     def post(self, request):
         if User.objects.filter(role='admin').exists():
             return Response({"detail": "An admin already exists. Use admin-signup endpoint."}, status=status.HTTP_400_BAD_REQUEST)
@@ -127,16 +132,15 @@ class InitialAdminSignUpView(APIView):
             refresh = RefreshToken.for_user(user)
             refresh_token = str(refresh)
             access_token = str(refresh.access_token)
-            refresh_payload = jwt.decode(refresh_token, settings.SECRET_KEY, algorithms=["HS256"])
-            access_expires_in = 900
-            refresh_expires_in = int(refresh_payload['exp'] - refresh_payload['iat'])
+            refresh_expires_at = timezone.now() + refresh.lifetime
+            access_expires_at = timezone.now() + timedelta(minutes=15)
             Token.objects.create(
                 user=user,
                 email=user.email,
                 refresh_token=refresh_token,
                 access_token=access_token,
-                refresh_token_expires_at=timezone.now() + timedelta(seconds=refresh_expires_in),
-                access_token_expires_at=timezone.now() + timedelta(minutes=15)
+                refresh_token_expires_at=refresh_expires_at,
+                access_token_expires_at=access_expires_at
             )
             logger.info(f"Initial admin created: {user.email}")
             return Response({
@@ -150,7 +154,6 @@ class InitialAdminSignUpView(APIView):
 class AdminSignUpView(APIView):
     """Handle admin signup by an existing admin."""
     permission_classes = [IsAuthenticated, IsAdmin]
-
     def post(self, request):
         serializer = RegisterSerializer(data=request.data)
         if serializer.is_valid():
@@ -177,7 +180,6 @@ class AdminSignUpView(APIView):
 class AdminUserManagementView(APIView):
     """Manage users (view, update role, delete) by admins."""
     permission_classes = [IsAuthenticated, IsAdmin]
-
     def get(self, request, user_id=None):
         if user_id:
             try:
@@ -192,7 +194,6 @@ class AdminUserManagementView(APIView):
             serializer = UserProfileSerializer(users, many=True, context={'request': request})
             logger.info(f"User list accessed by: {request.user.email}")
             return Response({"users": serializer.data}, status=status.HTTP_200_OK)
-
     def put(self, request, user_id):
         try:
             user = User.objects.get(id=user_id)
@@ -206,7 +207,6 @@ class AdminUserManagementView(APIView):
             return Response({"message": "User role updated successfully.", "user": serializer.data}, status=status.HTTP_200_OK)
         except User.DoesNotExist:
             return Response({"detail": "User not found."}, status=status.HTTP_404_NOT_FOUND)
-
     def delete(self, request, user_id):
         try:
             user = User.objects.get(id=user_id)
@@ -217,106 +217,12 @@ class AdminUserManagementView(APIView):
         except User.DoesNotExist:
             return Response({"detail": "User not found."}, status=status.HTTP_404_NOT_FOUND)
 
-class VendorDashboardView(APIView):
-    """Handle vendor dashboard access with real-time statistics."""
-    permission_classes = [IsAuthenticated, IsVendor]
 
-    def get(self, request):
-        user = request.user
-        try:
-            vendor = Vendor.objects.get(user=user)
-        except Vendor.DoesNotExist:
-            return Response({"detail": "Vendor profile not found."}, status=status.HTTP_404_NOT_FOUND)
 
-        visits = Visit.objects.filter(vendor=vendor)
-        redemptions = Redemption.objects.filter(loyalty_program__vendor=vendor)
-        total_visits = visits.count()
-        total_redemptions = redemptions.count()
-        avg_redemption_value = redemptions.aggregate(models.Avg('loyalty_program__max_redemptions_per_day'))['loyalty_program__max_redemptions_per_day__avg'] or 0
-        top_users = visits.values('user__email').annotate(total_visits=models.Count('id')).order_by('-total_visits')[:5]
-
-        serializer = UserProfileSerializer(user, context={'request': request})
-        return Response({
-            "message": "Vendor dashboard accessed successfully.",
-            "user": serializer.data,
-            "stats": {
-                "total_visits": total_visits,
-                "total_redemptions": total_redemptions,
-                "avg_redemption_value": avg_redemption_value,
-                "top_users": top_users
-            }
-        }, status=status.HTTP_200_OK)
-
-class LoyaltyProgramView(APIView):
-    """Handle loyalty program creation, update, and retrieval."""
-    permission_classes = [IsAuthenticated, IsVendor]
-
-    def get(self, request, program_id=None):
-        try:
-            vendor = Vendor.objects.get(user=request.user)
-        except Vendor.DoesNotExist:
-            return Response({"detail": "Vendor profile not found."}, status=status.HTTP_404_NOT_FOUND)
-
-        if program_id:
-            try:
-                program = LoyaltyProgram.objects.get(id=program_id, vendor=vendor)
-                serializer = LoyaltyProgramSerializer(program)
-                return Response(serializer.data, status=status.HTTP_200_OK)
-            except LoyaltyProgram.DoesNotExist:
-                return Response({"detail": "Loyalty program not found."}, status=status.HTTP_404_NOT_FOUND)
-        else:
-            programs = LoyaltyProgram.objects.filter(vendor=vendor)
-            serializer = LoyaltyProgramSerializer(programs, many=True)
-            return Response({"programs": serializer.data}, status=status.HTTP_200_OK)
-
-    def post(self, request):
-        try:
-            vendor = Vendor.objects.get(user=request.user)
-        except Vendor.DoesNotExist:
-            return Response({"detail": "Vendor profile not found."}, status=status.HTTP_404_NOT_FOUND)
-
-        data = request.data.copy()
-        data['vendor'] = vendor.id
-        serializer = LoyaltyProgramSerializer(data=data, context={'request': request})
-        if serializer.is_valid():
-            serializer.save()
-            logger.info(f"Loyalty program created by {request.user.email}: {serializer.data['campaign_name']}")
-            return Response({"message": "Loyalty program created successfully.", "program": serializer.data}, status=status.HTTP_201_CREATED)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-class RedemptionView(APIView):
-    """Handle redemption log and fraud flagging."""
-    permission_classes = [IsAuthenticated, IsVendor]
-
-    def get(self, request):
-        try:
-            vendor = Vendor.objects.get(user=request.user)
-        except Vendor.DoesNotExist:
-            return Response({"detail": "Vendor profile not found."}, status=status.HTTP_404_NOT_FOUND)
-
-        redemptions = Redemption.objects.filter(loyalty_program__vendor=vendor)
-        serializer = RedemptionSerializer(redemptions, many=True)
-        return Response({"redemptions": serializer.data}, status=status.HTTP_200_OK)
-
-    def post(self, request, redemption_id):
-        try:
-            vendor = Vendor.objects.get(user=request.user)
-            redemption = Redemption.objects.get(id=redemption_id, loyalty_program__vendor=vendor)
-        except Vendor.DoesNotExist:
-            return Response({"detail": "Vendor profile not found."}, status=status.HTTP_404_NOT_FOUND)
-        except Redemption.DoesNotExist:
-            return Response({"detail": "Redemption not found."}, status=status.HTTP_404_NOT_FOUND)
-
-        fraud_flagged = request.data.get('fraud_flagged', False)
-        redemption.fraud_flagged = fraud_flagged
-        redemption.save()
-        logger.info(f"Redemption {redemption_id} fraud flag updated by {request.user.email}: {fraud_flagged}")
-        return Response({"message": "Fraud flag updated successfully."}, status=status.HTTP_200_OK)
 
 class SendOTPView(APIView):
     """Send OTP for email verification, password reset, or 2FA."""
     permission_classes = [AllowAny]
-
     def post(self, request):
         serializer = SendOTPSerializer(data=request.data)
         if serializer.is_valid():
@@ -324,6 +230,7 @@ class SendOTPView(APIView):
             purpose = serializer.validated_data['purpose']
             user = User.objects.filter(email=email).first()
             if not user:
+                logger.info(f"OTP request for non-existent email: {email}")
                 return Response({"detail": "If the email exists, an OTP has been sent."}, status=status.HTTP_200_OK)
             code = None
             if purpose == 'email_verification' and not user.is_email_verified:
@@ -333,23 +240,23 @@ class SendOTPView(APIView):
             elif purpose == 'two_factor' and user.is_2fa_enabled:
                 code = user.generate_email_verification_code()
             else:
+                logger.warning(f"Invalid OTP purpose: {purpose} for user: {email}")
                 return Response({"detail": f"Invalid request for {purpose}."}, status=status.HTTP_400_BAD_REQUEST)
             if code:
                 send_mail(
                     f'{purpose.replace("_", " ").title()} OTP',
-                    f'Your OTP is {code}. Expires in 5 minutes.',
+                    f'Your OTP is {code}. Expires in {"5 minutes" if purpose != "password_reset" else "15 minutes"}.',
                     settings.DEFAULT_FROM_EMAIL,
                     [user.email],
                     fail_silently=False,
                 )
                 logger.info(f"OTP sent for {purpose}: {user.email}")
-            return Response({"message": "OTP sent to email. Expires in 5 minutes."}, status=status.HTTP_200_OK)
+                return Response({"message": f"OTP sent to email. Expires in {'5 minutes' if purpose != 'password_reset' else '15 minutes'}."}, status=status.HTTP_200_OK)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 class VerifyOTPView(APIView):
     """Verify OTP for email verification, password reset, or 2FA."""
     permission_classes = [AllowAny]
-
     def post(self, request):
         serializer = VerifyOTPSerializer(data=request.data)
         if serializer.is_valid():
@@ -359,8 +266,6 @@ class VerifyOTPView(APIView):
             user = User.objects.filter(email=email).first()
             if not user:
                 return Response({"ok": False, "error": "Invalid OTP."}, status=status.HTTP_400_BAD_REQUEST)
-            
-            # Track OTP attempts
             MAX_ATTEMPTS = 3
             if purpose == 'email_verification':
                 if user.is_email_verified:
@@ -379,7 +284,6 @@ class VerifyOTPView(APIView):
                 user.save()
                 logger.info(f"Email verified for: {user.email}")
                 return Response({"ok": True, "message": "OTP verified"}, status=status.HTTP_200_OK)
-            
             elif purpose == 'password_reset':
                 if user.otp_attempts >= MAX_ATTEMPTS:
                     return Response({"ok": False, "error": "Too many attempts"}, status=status.HTTP_403_FORBIDDEN)
@@ -395,7 +299,6 @@ class VerifyOTPView(APIView):
                 user.save()
                 logger.info(f"Password reset OTP verified for: {user.email}")
                 return Response({"ok": True, "message": "OTP verified", "reset_token": reset_token}, status=status.HTTP_200_OK)
-            
             elif purpose == 'two_factor':
                 if user.otp_attempts >= MAX_ATTEMPTS:
                     return Response({"ok": False, "error": "Too many attempts"}, status=status.HTTP_403_FORBIDDEN)
@@ -407,15 +310,12 @@ class VerifyOTPView(APIView):
                 user.save()
                 logger.info(f"2FA OTP verified for: {user.email}")
                 return Response({"ok": True, "message": "OTP verified"}, status=status.HTTP_200_OK)
-            
             return Response({"ok": False, "error": "Invalid purpose."}, status=status.HTTP_400_BAD_REQUEST)
-        
         return Response({"ok": False, "error": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
 class LoginView(APIView):
     """Handle user login with password and optional 2FA."""
     permission_classes = [AllowAny]
-
     def post(self, request):
         serializer = LoginSerializer(data=request.data)
         if serializer.is_valid():
@@ -443,9 +343,8 @@ class LoginView(APIView):
                 refresh.set_exp(lifetime=lifetime)
                 refresh_token_str = str(refresh)
                 access_token_str = str(refresh.access_token)
-                refresh_payload = jwt.decode(refresh_token_str, settings.SECRET_KEY, algorithms=["HS256"])
                 access_expires_in = 900
-                refresh_expires_in = int(refresh_payload['exp'] - refresh_payload['iat'])
+                refresh_expires_in = int(refresh.lifetime.total_seconds())
                 Token.objects.create(
                     user=user,
                     email=user.email,
@@ -475,7 +374,6 @@ class LoginView(APIView):
 class RefreshTokenView(APIView):
     """Refresh access token using a valid refresh token."""
     permission_classes = [AllowAny]
-
     def post(self, request):
         serializer = RefreshTokenSerializer(data=request.data)
         if serializer.is_valid():
@@ -504,7 +402,6 @@ class RefreshTokenView(APIView):
 class LogoutView(APIView):
     """Handle user logout by revoking refresh tokens."""
     permission_classes = [IsAuthenticated]
-
     def post(self, request):
         refresh_token_str = request.data.get('refresh_token')
         if refresh_token_str:
@@ -517,7 +414,6 @@ class LogoutView(APIView):
 class ForgotPasswordView(APIView):
     """Initiate password reset by sending an OTP."""
     permission_classes = [AllowAny]
-
     def post(self, request):
         serializer = ForgotPasswordSerializer(data=request.data)
         if serializer.is_valid():
@@ -541,7 +437,6 @@ class ForgotPasswordView(APIView):
 class VerifyResetOTPView(APIView):
     """Verify OTP for password reset."""
     permission_classes = [AllowAny]
-
     def post(self, request):
         serializer = VerifyResetOTPSerializer(data=request.data)
         if serializer.is_valid():
@@ -565,7 +460,6 @@ class VerifyResetOTPView(APIView):
 class ResetPasswordConfirmView(APIView):
     """Confirm password reset with a new password."""
     permission_classes = [AllowAny]
-
     def post(self, request):
         serializer = ResetPasswordSerializer(data=request.data)
         if serializer.is_valid():
@@ -586,7 +480,6 @@ class ResetPasswordConfirmView(APIView):
 class ChangePasswordView(APIView):
     """Change password for authenticated users."""
     permission_classes = [IsAuthenticated]
-
     def post(self, request):
         serializer = ChangePasswordSerializer(data=request.data)
         if serializer.is_valid():
@@ -602,7 +495,6 @@ class ChangePasswordView(APIView):
 class Enable2FAView(APIView):
     """Initiate 2FA enablement for authenticated users."""
     permission_classes = [IsAuthenticated]
-
     def post(self, request):
         serializer = Enable2FASerializer(data=request.data)
         if serializer.is_valid():
@@ -625,7 +517,6 @@ class Enable2FAView(APIView):
 class Verify2FAView(APIView):
     """Verify 2FA OTP to enable 2FA."""
     permission_classes = [IsAuthenticated]
-
     def post(self, request):
         serializer = Verify2FASerializer(data=request.data)
         if serializer.is_valid():
@@ -644,25 +535,26 @@ class Verify2FAView(APIView):
 class MeView(APIView):
     """Handle user profile retrieval, update, and deletion."""
     permission_classes = [IsAuthenticated]
-
+    @method_decorator(never_cache)
     def get(self, request):
+        logger.debug(f"GET request for user: {request.user.email}")
         serializer = UserProfileSerializer(request.user, context={'request': request})
         return Response(serializer.data, status=status.HTTP_200_OK)
-
     def put(self, request):
-        profile, _ = Profile.objects.get_or_create(user=request.user)
+        profile, created = Profile.objects.get_or_create(user=request.user)
+        logger.debug(f"PUT request for user: {request.user.email}, data: {request.data}")
         serializer = ProfileUpdateSerializer(profile, data=request.data, context={'request': request}, partial=True)
         if serializer.is_valid():
             serializer.save()
+            logger.info(f"Profile updated for user: {request.user.email}")
             return Response({
                 "message": "Profile updated successfully.",
                 "user": UserProfileSerializer(request.user, context={'request': request}).data
             }, status=status.HTTP_200_OK)
+        logger.error(f"Profile update failed for user: {request.user.email}, errors: {serializer.errors}")
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
     def patch(self, request):
         return self.put(request)
-
     def delete(self, request):
         password = request.data.get('current_password')
         if password and not request.user.check_password(password):
@@ -675,7 +567,6 @@ class MeView(APIView):
 class ResendOTPView(APIView):
     """Resend verification OTP for email verification."""
     permission_classes = [AllowAny]
-
     def post(self, request):
         serializer = ResendOTPSerializer(data=request.data)
         if serializer.is_valid():
@@ -696,3 +587,177 @@ class ResendOTPView(APIView):
             logger.info(f"OTP resent for: {user.email}")
             return Response({"message": "Verification OTP resent. Expires in 5 minutes."}, status=status.HTTP_200_OK)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+class GoogleLoginView(APIView):
+    """Initiate Google OAuth login."""
+    permission_classes = [AllowAny]
+    def get(self, request):
+        auth_url = (
+            f"https://accounts.google.com/o/oauth2/v2/auth?"
+            f"client_id={os.getenv('GOOGLE_CLIENT_ID')}&"
+            f"redirect_uri={os.getenv('GOOGLE_REDIRECT_URI')}&"
+            f"scope=openid%20email%20profile&"
+            f"response_type=code&"
+            f"access_type=offline&prompt=consent"
+        )
+        return HttpResponseRedirect(auth_url)
+
+class GoogleCallbackView(APIView):
+    """Handle Google OAuth callback."""
+    permission_classes = [AllowAny]
+    def get(self, request):
+        code = request.GET.get('code')
+        if not code:
+            return JsonResponse({'error': 'Authorization code missing'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            token_response = requests.post('https://oauth2.googleapis.com/token', data={
+                'code': code,
+                'client_id': os.getenv('GOOGLE_CLIENT_ID'),
+                'client_secret': os.getenv('GOOGLE_CLIENT_SECRET'),
+                'redirect_uri': os.getenv('GOOGLE_REDIRECT_URI'),
+                'grant_type': 'authorization_code'
+            }).json()
+            if 'error' in token_response:
+                logger.error(f"Google token exchange failed: {token_response.get('error_description')}")
+                return JsonResponse({'error': 'Google token exchange failed'}, status=status.HTTP_400_BAD_REQUEST)
+            access_token = token_response['access_token']
+            user_info = requests.get(
+                'https://www.googleapis.com/oauth2/v2/userinfo',
+                headers={'Authorization': f'Bearer {access_token}'}
+            ).json()
+            email = user_info.get('email')
+            if not email:
+                return JsonResponse({'error': 'Google did not provide an email address.'}, status=status.HTTP_400_BAD_REQUEST)
+            user, created = User.objects.get_or_create(email=email)
+            if created:
+                user.full_name = user_info.get('name', '')
+                user.is_email_verified = True
+                user.is_active = True
+                user.set_unusable_password()
+                user.save()
+                Profile.objects.create(user=user)
+                logger.info(f"New user created via Google: {email}")
+            elif not user.is_active:
+                user.is_active = True
+                user.is_email_verified = True
+                user.save()
+            refresh = RefreshToken.for_user(user)
+            refresh_token_str = str(refresh)
+            access_token_str = str(refresh.access_token)
+            refresh_expires_at = timezone.now() + refresh.lifetime
+            access_expires_at = timezone.now() + timedelta(minutes=15)
+            Token.objects.create(
+                user=user,
+                email=user.email,
+                refresh_token=refresh_token_str,
+                access_token=access_token_str,
+                refresh_token_expires_at=refresh_expires_at,
+                access_token_expires_at=access_expires_at
+            )
+            logger.info(f"User logged in via Google: {user.email}")
+            return JsonResponse({
+                'access_token': access_token_str,
+                'access_token_expires_in': int(timedelta(minutes=15).total_seconds()),
+                'refresh_token': refresh_token_str,
+                'refresh_token_expires_in': int(refresh.lifetime.total_seconds()),
+                'token_type': "Bearer",
+                'user': {
+                    'id': user.id,
+                    'email': user.email,
+                    'full_name': user.full_name,
+                    'email_verified': user.is_email_verified,
+                    'role': user.role
+                }
+            }, status=status.HTTP_200_OK)
+        except requests.RequestException as e:
+            logger.error(f"HTTP request error during Google login: {e}")
+            return JsonResponse({'error': 'Network or API error during Google login.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        except Exception as e:
+            logger.error(f'Critical error during Google login: {str(e)}')
+            return JsonResponse({'error': f'Google login failed: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class AppleLoginView(APIView):
+    """Initiate Apple OAuth login."""
+    permission_classes = [AllowAny]
+    def get(self, request):
+        auth_url = (
+            f"https://appleid.apple.com/auth/authorize?"
+            f"client_id={os.getenv('APPLE_CLIENT_ID')}&"
+            f"redirect_uri={os.getenv('APPLE_REDIRECT_URI')}&"
+            f"response_type=code%20id_token&"
+            f"scope=name%20email&"
+            f"response_mode=form_post"
+        )
+        return HttpResponseRedirect(auth_url)
+
+class AppleCallbackView(APIView):
+    """Handle Apple OAuth callback."""
+    permission_classes = [AllowAny]
+    def post(self, request):
+        code = request.POST.get('code')
+        id_token = request.POST.get('id_token')
+        if not code and not id_token:
+            return JsonResponse({'error': 'Missing authorization data'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            token_response = requests.post('https://appleid.apple.com/auth/token', data={
+                'grant_type': 'authorization_code',
+                'code': code,
+                'client_id': os.getenv('APPLE_CLIENT_ID'),
+                'client_secret': os.getenv('APPLE_CLIENT_SECRET'),
+                'redirect_uri': os.getenv('APPLE_REDIRECT_URI'),
+            }, headers={'Content-Type': 'application/x-www-form-urlencoded'}).json()
+            if 'error' in token_response:
+                logger.error(f"Apple token exchange failed: {token_response.get('error')}")
+                return JsonResponse({'error': token_response['error']}, status=status.HTTP_400_BAD_REQUEST)
+            id_token = token_response.get('id_token', id_token)
+            decoded = jwt.decode(id_token, options={"verify_signature": False})
+            user_email = decoded.get('email')
+            if not user_email:
+                return JsonResponse({'error': 'Apple did not provide an email address.'}, status=status.HTTP_400_BAD_REQUEST)
+            user, created = User.objects.get_or_create(email=user_email)
+            if created:
+                user.full_name = decoded.get('name', '')
+                user.is_email_verified = True
+                user.is_active = True
+                user.set_unusable_password()
+                user.save()
+                Profile.objects.create(user=user)
+                logger.info(f"New user created via Apple: {user_email}")
+            elif not user.is_active:
+                user.is_active = True
+                user.is_email_verified = True
+                user.save()
+            refresh = RefreshToken.for_user(user)
+            refresh_token_str = str(refresh)
+            access_token_str = str(refresh.access_token)
+            refresh_expires_at = timezone.now() + refresh.lifetime
+            access_expires_at = timezone.now() + timedelta(minutes=15)
+            Token.objects.create(
+                user=user,
+                email=user.email,
+                refresh_token=refresh_token_str,
+                access_token=access_token_str,
+                refresh_token_expires_at=refresh_expires_at,
+                access_token_expires_at=access_expires_at
+            )
+            logger.info(f"User logged in via Apple: {user.email}")
+            return JsonResponse({
+                'access_token': access_token_str,
+                'access_token_expires_in': int(timedelta(minutes=15).total_seconds()),
+                'refresh_token': refresh_token_str,
+                'refresh_token_expires_in': int(refresh.lifetime.total_seconds()),
+                'token_type': "Bearer",
+                'user': {
+                    'id': user.id,
+                    'email': user.email,
+                    'full_name': user.full_name,
+                    'email_verified': user.is_email_verified,
+                    'role': user.role
+                }
+            }, status=status.HTTP_200_OK)
+        except requests.RequestException as e:
+            logger.error(f"HTTP request error during Apple login: {e}")
+            return JsonResponse({'error': 'Network or API error during Apple login.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        except Exception as e:
+            logger.error(f'Critical error during Apple login: {str(e)}')
+            return JsonResponse({'error': f'Apple login failed: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

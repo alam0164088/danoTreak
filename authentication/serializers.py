@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import User, SubscriptionPlan, Profile, Vendor, LoyaltyProgram, Visit, Redemption
+from .models import User, Profile, Vendor
 import re
 from django.utils import timezone
 from datetime import timedelta
@@ -147,10 +147,10 @@ class ProfileUpdateSerializer(serializers.ModelSerializer):
         instance.save()
         return instance
 
-class SubscriptionPlanSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = SubscriptionPlan
-        fields = ['id', 'name', 'price']
+# class SubscriptionPlanSerializer(serializers.ModelSerializer):
+#     class Meta:
+#         model = SubscriptionPlan
+#         fields = ['id', 'name', 'price']
 
 class UserSerializer(serializers.ModelSerializer):
     email_verified = serializers.BooleanField(source='is_email_verified', read_only=True)
@@ -178,44 +178,45 @@ class VendorSerializer(serializers.ModelSerializer):
         fields = ['id', 'user', 'business_name', 'location', 'geofence_radius', 'created_at', 'updated_at']
         read_only_fields = ['id', 'user', 'created_at', 'updated_at']
 
-class LoyaltyProgramSerializer(serializers.ModelSerializer):
-    vendor = serializers.PrimaryKeyRelatedField(read_only=True)
+# class LoyaltyProgramSerializer(serializers.ModelSerializer):
+#     vendor = serializers.PrimaryKeyRelatedField(read_only=True)
 
-    class Meta:
-        model = LoyaltyProgram
-        fields = ['id', 'vendor', 'campaign_name', 'visits_required', 'reward_description', 
-                  'max_redemptions_per_day', 'valid_until', 'cooldown_period', 'is_active', 'created_at']
-        read_only_fields = ['id', 'vendor', 'created_at']
+#     class Meta:
+#         model = LoyaltyProgram
+#         fields = ['id', 'vendor', 'campaign_name', 'visits_required', 'reward_description', 
+#                   'max_redemptions_per_day', 'valid_until', 'cooldown_period', 'is_active', 'created_at']
+#         read_only_fields = ['id', 'vendor', 'created_at']
 
-    def validate(self, data):
-        if data.get('visits_required') <= 0:
-            raise serializers.ValidationError({"visits_required": "Must be a positive integer."})
-        if data.get('max_redemptions_per_day') < 0:
-            raise serializers.ValidationError({"max_redemptions_per_day": "Cannot be negative."})
-        if data.get('cooldown_period') < 0:
-            raise serializers.ValidationError({"cooldown_period": "Cannot be negative."})
-        if data.get('valid_until') <= timezone.now():
-            raise serializers.ValidationError({"valid_until": "Must be a future date."})
-        return data
+#     def validate(self, data):
+#         if data.get('visits_required') <= 0:
+#             raise serializers.ValidationError({"visits_required": "Must be a positive integer."})
+#         if data.get('max_redemptions_per_day') < 0:
+#             raise serializers.ValidationError({"max_redemptions_per_day": "Cannot be negative."})
+#         if data.get('cooldown_period') < 0:
+#             raise serializers.ValidationError({"cooldown_period": "Cannot be negative."})
+#         if data.get('valid_until') <= timezone.now():
+#             raise serializers.ValidationError({"valid_until": "Must be a future date."})
+#         return data
 
-    def create(self, validated_data):
-        vendor = self.context['request'].user.vendor  # Use authenticated vendor
-        return LoyaltyProgram.objects.create(vendor=vendor, **validated_data)
+#     def create(self, validated_data):
+#         vendor = self.context['request'].user.vendor  # Use authenticated vendor
+#         return LoyaltyProgram.objects.create(vendor=vendor, **validated_data)
 
-class VisitSerializer(serializers.ModelSerializer):
-    user = serializers.PrimaryKeyRelatedField(read_only=True)
-    vendor = serializers.PrimaryKeyRelatedField(read_only=True)
 
-    class Meta:
-        model = Visit
-        fields = ['id', 'user', 'vendor', 'timestamp', 'duration', 'is_valid']
-        read_only_fields = ['id', 'user', 'vendor', 'timestamp', 'is_valid']
+# class VisitSerializer(serializers.ModelSerializer):
+#     user = serializers.PrimaryKeyRelatedField(read_only=True)
+#     vendor = serializers.PrimaryKeyRelatedField(read_only=True)
 
-class RedemptionSerializer(serializers.ModelSerializer):
-    user = serializers.PrimaryKeyRelatedField(read_only=True)
-    loyalty_program = serializers.PrimaryKeyRelatedField(read_only=True)
+#     class Meta:
+#         model = Visit
+#         fields = ['id', 'user', 'vendor', 'timestamp', 'duration', 'is_valid']
+#         read_only_fields = ['id', 'user', 'vendor', 'timestamp', 'is_valid']
 
-    class Meta:
-        model = Redemption
-        fields = ['id', 'user', 'loyalty_program', 'timestamp', 'location_verified', 'fraud_flagged']
-        read_only_fields = ['id', 'user', 'loyalty_program', 'timestamp']
+# class RedemptionSerializer(serializers.ModelSerializer):
+#     user = serializers.PrimaryKeyRelatedField(read_only=True)
+#     loyalty_program = serializers.PrimaryKeyRelatedField(read_only=True)
+
+#     class Meta:
+#         model = Redemption
+#         fields = ['id', 'user', 'loyalty_program', 'timestamp', 'location_verified', 'fraud_flagged']
+#         read_only_fields = ['id', 'user', 'loyalty_program', 'timestamp']
