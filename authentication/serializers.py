@@ -31,13 +31,13 @@ class RegisterSerializer(serializers.ModelSerializer):
         validated_data.pop('password_confirm')
         validated_data.pop('send_verification_otp')
         user = User.objects.create_user(
+            username=validated_data['email'],  # Set username to email
             email=validated_data['email'],
             password=validated_data['password'],
             full_name=validated_data['full_name'],
             role=validated_data.get('role', 'user')
         )
         return user
-
 
 class SendOTPSerializer(serializers.Serializer):
     email = serializers.EmailField()
