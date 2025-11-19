@@ -35,3 +35,4 @@ urlpatterns = [
     path('/apple/login/', AppleLoginView.as_view(), name='apple_login'),
     path('/apple/login/callback/', AppleCallbackView.as_view(), name='apple_callback'),
 ]
+# 
