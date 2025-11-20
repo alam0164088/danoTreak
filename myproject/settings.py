@@ -114,14 +114,13 @@ TEMPLATES = [
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'postgres',  # অথবা তোমার নিজের ডাটাবেস নাম
+        'NAME': 'danotreak_db',  # নতুন database
         'USER': 'Nazmul13',
         'PASSWORD': 'nazmul13',
         'HOST': '127.0.0.1',
         'PORT': '5432',
     }
 }
-
 
 
 # ------------------------------

@@ -12,7 +12,8 @@ class RegisterSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ['email', 'password', 'password_confirm', 'full_name', 'send_verification_otp', 'role']
+        fields = ['email', 'password', 'password_confirm', 'full_name', 'send_verification_otp', 'role', 'referral_code']
+
 
     def validate(self, data):
         if data['password'] != data['password_confirm']:
@@ -219,4 +220,27 @@ class VendorSerializer(serializers.ModelSerializer):
 #     class Meta:
 #         model = Redemption
 #         fields = ['id', 'user', 'loyalty_program', 'timestamp', 'location_verified', 'fraud_flagged']
-#         read_only_fields = ['id', 'user', 'loyalty_program', 'timestamp']
+
+
+
+
+# authentication/serializers.py
+
+# ← এখানে অন্যান্য সিরিয়ালাইজার আছে (RegisterSerializer, LoginSerializer ইত্যাদি)
+# ← সব শেষ হওয়ার পর নিচে এই কোডটা পেস্ট করো
+
+from django.conf import settings   # যদি উপরে না থাকে তাহলে এখানে লিখো
+
+
+class ReferralCodeSerializer(serializers.ModelSerializer):
+    referral_code = serializers.CharField(read_only=True)
+    referral_link = serializers.SerializerMethodField()
+    total_referrals = serializers.IntegerField(source='referrals.count', read_only=True)
+
+    class Meta:
+        model = User
+        fields = ['referral_code', 'referral_link', 'total_referrals']
+
+    def get_referral_link(self, obj):
+        base_url = getattr(settings, 'FRONTEND_URL', 'https://danotreak.com')
+        return f"{base_url}/register?ref={obj.referral_code}"

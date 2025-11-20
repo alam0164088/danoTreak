@@ -4,49 +4,107 @@ from django.utils.translation import gettext_lazy as _
 from django.utils import timezone
 from datetime import timedelta
 import uuid
+import random
+import string
 
 from django.contrib.auth.models import BaseUserManager
 
+
+# --------------------------
+# USER MANAGER
+# --------------------------
 class UserManager(BaseUserManager):
-    def create_user(self, email, password=None, **extra_fields):
+    def create_user(self, email, password=None, referral_code=None, **extra_fields):
         if not email:
             raise ValueError('The Email must be set')
+
         email = self.normalize_email(email)
         user = self.model(email=email, **extra_fields)
+
+        # If user signed up using a referral code
+        if referral_code:
+            try:
+                referrer = User.objects.get(referral_code__iexact=referral_code.strip())
+                user.referred_by = referrer
+            except User.DoesNotExist:
+                pass  #
+
         user.set_password(password)
         user.save(using=self._db)
         return user
 
     def create_superuser(self, email, password=None, **extra_fields):
-        extra_fields.setdefault('is_staff', True)
-        extra_fields.setdefault('is_superuser', True)
+        extra_fields.setdefault("is_staff", True)
+        extra_fields.setdefault("is_superuser", True)
         return self.create_user(email, password, **extra_fields)
 
 
+# --------------------------
+# USER MODEL
+# --------------------------
 class User(AbstractUser):
     ROLE_CHOICES = (
         ('admin', 'Admin'),
         ('user', 'User'),
         ('vendor', 'Vendor'),
     )
+
     email = models.EmailField(_('email address'), unique=True)
     role = models.CharField(max_length=10, choices=ROLE_CHOICES, default='user')
+
     is_email_verified = models.BooleanField(default=False)
     email_verification_code = models.CharField(max_length=6, blank=True, null=True)
     email_verification_code_expires_at = models.DateTimeField(blank=True, null=True)
+
     password_reset_code = models.CharField(max_length=6, blank=True, null=True)
     password_reset_code_expires_at = models.DateTimeField(blank=True, null=True)
+
     full_name = models.CharField(max_length=255, blank=True)
-    gender = models.CharField(max_length=10, blank=True, choices=[('male', 'Male'), ('female', 'Female'), ('other', 'Other')])
+    gender = models.CharField(
+        max_length=10,
+        blank=True,
+        choices=[('male', 'Male'), ('female', 'Female'), ('other', 'Other')]
+    )
+
     is_2fa_enabled = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
-    otp_attempts = models.PositiveIntegerField(default=0)  # Added for OTP attempt tracking
+    otp_attempts = models.PositiveIntegerField(default=0)
+
+    # -------------------------------
+    # ⭐ NEW: REFERRAL SYSTEM
+    # -------------------------------
+    referral_code = models.CharField(max_length=20, unique=True, blank=True, null=True)
+
+
+
+    referred_by = models.ForeignKey(
+        "self",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="referrals"
+    )
+    # -------------------------------
 
     USERNAME_FIELD = 'email'
-    REQUIRED_FIELDS = []  # Removed 'username'
+    REQUIRED_FIELDS = []  # Removed username
+
+    objects = UserManager()
 
     def __str__(self):
         return self.email
+
+        # Generate referral code automatically
+    def generate_referral_code(self):
+        while True:
+            code = "REF" + ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
+            if not User.objects.filter(referral_code=code).exists():
+                return code
+
+    def save(self, *args, **kwargs):
+        if not self.referral_code:
+            self.referral_code = self.generate_referral_code()
+        super().save(*args, **kwargs)
 
     def generate_email_verification_code(self):
         from .utils import generate_otp
@@ -64,6 +122,10 @@ class User(AbstractUser):
         self.save(update_fields=['password_reset_code', 'password_reset_code_expires_at'])
         return code
 
+
+# --------------------------
+# TOKEN MODEL
+# --------------------------
 class Token(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE)
     email = models.EmailField()
@@ -77,6 +139,10 @@ class Token(models.Model):
     def __str__(self):
         return f"{self.user.email} - Token"
 
+
+# --------------------------
+# PASSWORD RESET SESSION
+# --------------------------
 class PasswordResetSession(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE)
     token = models.UUIDField(default=uuid.uuid4, unique=True)
@@ -89,13 +155,16 @@ class PasswordResetSession(models.Model):
         return f"Password Reset Session for {self.user.email}"
 
 
+# --------------------------
+# PROFILE MODEL
+# --------------------------
 class Profile(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
     employee_id = models.CharField(max_length=20, unique=True, blank=True)
     phone = models.CharField(max_length=20, blank=True)
+    image = models.ImageField(upload_to='profile_images/', default='profile_images/default_profile.png')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    image = models.ImageField(upload_to='profile_images/', default='profile_images/default_profile.png')
 
     def __str__(self):
         return f"Profile for {self.user.email}"
@@ -106,6 +175,10 @@ class Profile(models.Model):
             self.employee_id = f"EMP{last_count:03d}"
         super().save(*args, **kwargs)
 
+
+# --------------------------
+# VENDOR MODEL
+# --------------------------
 class Vendor(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='vendor')
     business_name = models.CharField(max_length=255)
@@ -118,17 +191,17 @@ class Vendor(models.Model):
         return f"{self.business_name} ({self.user.email})"
 
 
-
-
-
+# --------------------------
+# EMAIL OTP
+# --------------------------
 class EmailOTP(models.Model):
     email = models.EmailField()
     otp_hash = models.CharField(max_length=64)
     raw_otp = models.CharField(max_length=6, null=True, blank=True)
     expires_at = models.DateTimeField()
     created_at = models.DateTimeField(auto_now_add=True)
-    used = models.BooleanField(default=False)  # OTP use হয়েছে কি না
-    attempts = models.PositiveIntegerField(default=0)  # OTP চেষ্টা সংখ্যা
+    used = models.BooleanField(default=False)
+    attempts = models.PositiveIntegerField(default=0)
 
     def __str__(self):
         return f"OTP for {self.email}"
