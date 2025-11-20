@@ -73,40 +73,73 @@ class RegisterView(APIView):
                 }, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+
+
+
 class VendorSignUpView(APIView):
-    """Handle vendor signup by an existing admin."""
-    permission_classes = [IsAuthenticated, IsAdmin]
+    """
+    Vendor নিজে নিজে সাইনআপ করবে → শুধু ইমেইল + পাসওয়ার্ড
+    কোনো full_name, phone লাগবে না
+    """
+    permission_classes = [AllowAny]  # কেউ লগইন না থাকলেও করতে পারবে
+
     def post(self, request):
-        serializer = RegisterSerializer(data=request.data)
-        if serializer.is_valid():
-            user = serializer.save()
-            user.role = 'vendor'
-            user.is_active = False
-            user.save()
-            vendor_data = {
-                'business_name': request.data.get('business_name'),
-                'location': request.data.get('location'),
-                'geofence_radius': request.data.get('geofence_radius', 100.0)
+        email = request.data.get('email')
+        password = request.data.get('password')
+        password2 = request.data.get('password2')
+
+        # বেসিক ভ্যালিডেশন
+        if not email or not password:
+            return Response({
+                "success": False,
+                "message": "ইমেইল এবং পাসওয়ার্ড দিতে হবে"
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        if password != password2:
+            return Response({
+                "success": False,
+                "message": "দুইটা পাসওয়ার্ড মিলছে না"
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        if User.objects.filter(email__iexact=email).exists():
+            return Response({
+                "success": False,
+                "message": "এই ইমেইল দিয়ে ইতিমধ্যে একাউন্ট আছে"
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # ভেন্ডর ইউজার তৈরি করো (শুধু ইমেইল + পাসওয়ার্ড)
+        user = User.objects.create_user(
+            email=email.lower(),
+            password=password,
+            role='vendor',
+            is_active=False  # এডমিন অ্যাপ্রুভ করলে active হবে
+        )
+
+        # OTP পাঠাও ইমেইল ভেরিফিকেশনের জন্য
+        code = user.generate_email_verification_code()
+        send_mail(
+            'ভেন্ডর একাউন্ট যাচাই করুন - DanoTreak',
+            f'আপনার ভেরিফিকেশন কোড: {code}\nএই কোড ৫ মিনিটের জন্য বৈধ।',
+            settings.DEFAULT_FROM_EMAIL,
+            [user.email],
+            fail_silently=False,
+        )
+
+        return Response({
+            "success": True,
+            "message": "ভেন্ডর একাউন্ট তৈরি হয়েছে! ইমেইল চেক করে OTP দিয়ে যাচাই করুন।",
+            "next_step": "verify_email_with_otp",
+            "user": {
+                "id": user.id,
+                "email": user.email,
+                "role": "vendor",
+                "is_active": False
             }
-            vendor_serializer = VendorSerializer(data=vendor_data)
-            if vendor_serializer.is_valid():
-                vendor_serializer.save(user=user)
-                code = user.generate_email_verification_code()
-                send_mail(
-                    'Verify Your Vendor Email',
-                    f'Your verification code is {code}. Expires in 5 minutes.',
-                    settings.DEFAULT_FROM_EMAIL,
-                    [user.email],
-                    fail_silently=False,
-                )
-                logger.info(f"Vendor created by {request.user.email}: {user.email}")
-                return Response({
-                    "id": user.id,
-                    "email": user.email,
-                    "message": "Vendor created. Verification OTP sent to email."
-                }, status=status.HTTP_201_CREATED)
-            return Response(vendor_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        }, status=status.HTTP_201_CREATED)
+
+
+
+
 
 class InitialAdminSignUpView(APIView):
     """Handle initial admin signup (only one admin allowed initially)."""
