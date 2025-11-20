@@ -761,3 +761,18 @@ class AppleCallbackView(APIView):
         except Exception as e:
             logger.error(f'Critical error during Apple login: {str(e)}')
             return JsonResponse({'error': f'Apple login failed: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+
+from .serializers import ReferralCodeSerializer
+from django.conf import settings
+
+class MyReferralCodeView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        serializer = ReferralCodeSerializer(user)
+        return Response({
+            "success": True,
+            "data": serializer.data
+        }, status=status.HTTP_200_OK)
