@@ -24,10 +24,31 @@ class ProfileAdmin(admin.ModelAdmin):
     list_display = ['user', 'employee_id', 'phone', 'created_at']
     search_fields = ['user__email', 'employee_id']
 
+    
+
+# পুরানো VendorAdmin মুছে ফেলো বা এভাবে আপডেট করো
 @admin.register(Vendor)
 class VendorAdmin(admin.ModelAdmin):
-    list_display = ['user', 'business_name', 'location', 'geofence_radius', 'created_at']
-    search_fields = ['user__email', 'business_name']
+    list_display = ('shop_name', 'vendor_name', 'phone_number', 'category', 'is_profile_complete', 'created_at')
+    list_filter = ('category', 'is_profile_complete', 'created_at')
+    search_fields = ('shop_name', 'vendor_name', 'phone_number', 'shop_address')
+    readonly_fields = ('created_at', 'updated_at')
+
+    fieldsets = (
+        ('Main Info', {
+            'fields': ('user', 'vendor_name', 'shop_name', 'phone_number', 'category')
+        }),
+        ('Location', {
+            'fields': ('shop_address', 'latitude', 'longitude')
+        }),
+        ('Images & Status', {
+            'fields': ('shop_images', 'is_profile_complete')
+        }),
+        ('Timestamps', {
+            'fields': ('created_at', 'updated_at'),
+            'classes': ('collapse',)
+        }),
+    )
 
 
 
