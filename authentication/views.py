@@ -17,6 +17,7 @@ from jose import jwt
 import requests
 import os
 import re
+from .models import VendorProfileUpdateRequest  # or from the correct app
 
 from datetime import timedelta
 from django.http import HttpResponseRedirect, JsonResponse
@@ -912,3 +913,120 @@ class CompleteVendorProfileView(APIView):
             "profile_complete": True,
             "shop_name": vendor.shop_name
         }, status=200)
+    
+
+
+# authentication/views.py → CompleteVendorProfileView এর নিচে যোগ করো
+# ================== VENDOR: প্রোফাইল আপডেট রিকোয়েস্ট করা ==================
+class VendorProfileUpdateRequestView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        if request.user.role != 'vendor':
+            return Response({"success": False, "message": "শুধুমাত্র ভেন্ডর প্রোফাইল আপডেট করতে পারবে"}, status=403)
+
+        try:
+            vendor = request.user.vendor_profile  # assuming OneToOne relation
+        except AttributeError:
+            return Response({"success": False, "message": "ভেন্ডর প্রোফাইল পাওয়া যায়নি"}, status=404)
+
+        data = request.data.copy()
+
+        # রিকোয়েস্ট সেভ করি
+        update_request = VendorProfileUpdateRequest.objects.create(
+            vendor=vendor,
+            requested_by=request.user,
+            new_data=data
+        )
+
+        return Response({
+            "success": True,
+            "message": "প্রোফাইল আপডেটের জন্য রিকোয়েস্ট পাঠানো হয়েছে। এডমিন রিভিউ করবে।",
+            "request_id": update_request.id,
+            "status": "pending"
+        }, status=201)
+
+    def get(self, request):
+        if request.user.role != 'vendor':
+            return Response({"success": False, "message": "অ্যাক্সেস নিষেধ"}, status=403)
+
+        try:
+            vendor = request.user.vendor_profile
+            requests = vendor.update_requests.all().order_by('-created_at')
+            data = []
+            for r in requests:
+                data.append({
+                    "id": r.id,
+                    "status": r.status,
+                    "requested_at": r.created_at.strftime("%d %b %Y, %I:%M %p"),
+                    "reviewed_at": r.reviewed_at.strftime("%d %b %Y, %I:%M %p") if r.reviewed_at else None,
+                    "reason": r.reason or "কোনো কারণ দেওয়া হয়নি",
+                })
+            return Response({"success": True, "update_requests": data})
+        except:
+            return Response({"success": False, "message": "প্রোফাইল পাওয়া যায়নি"})
+
+
+# ================== ADMIN ONLY API: Approve / Reject (Postman Friendly) ==================
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from django.shortcuts import get_object_or_404
+from django.utils import timezone
+
+# কাস্টম চেক: শুধুমাত্র role = 'admin' হলে চলবে
+def admin_only(user):
+    return user.is_authenticated and getattr(user, 'role', None) == 'admin'
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def api_approve_vendor_update(request, request_id):
+    if not admin_only(request.user):
+        return Response({"success": False, "message": "শুধুমাত্র এডমিন এই কাজ করতে পারে"}, status=403)
+
+    update_req = get_object_or_404(VendorProfileUpdateRequest, id=request_id, status='pending')
+    vendor = update_req.vendor
+
+    # নতুন ডাটা প্রয়োগ করো
+    for field, value in update_req.new_data.items():
+        if hasattr(vendor, field):
+            setattr(vendor, field, value)
+    vendor.save()
+
+    # রিকোয়েস্ট স্ট্যাটাস আপডেট
+    update_req.status = 'approved'
+    update_req.reviewed_by = request.user
+    update_req.reviewed_at = timezone.now()
+    update_req.save()
+
+    return Response({
+        "success": True,
+        "message": "ভেন্ডর প্রোফাইল সফলভাবে আপডেট করা হয়েছে!",
+        "request_id": update_req.id,
+        "shop_name": vendor.shop_name,
+        "approved_by": request.user.email
+    }, status=200)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def api_reject_vendor_update(request, request_id):
+    if not admin_only(request.user):
+        return Response({"success": False, "message": "শুধুমাত্র এডমিন এই কাজ করতে পারে"}, status=403)
+
+    update_req = get_object_or_404(VendorProfileUpdateRequest, id=request_id, status='pending')
+    reason = request.data.get('reason', 'কোনো কারণ দেওয়া হয়নি')
+
+    update_req.status = 'rejected'
+    update_req.reviewed_by = request.user
+    update_req.reviewed_at = timezone.now()
+    update_req.reason = reason
+    update_req.save()
+
+    return Response({
+        "success": True,
+        "message": "প্রোফাইল আপডেট রিজেক্ট করা হয়েছে",
+        "request_id": update_req.id,
+        "reason": reason,
+        "rejected_by": request.user.email
+    }, status=200)

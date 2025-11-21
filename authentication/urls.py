@@ -1,5 +1,3 @@
-# authentication/urls.py
-
 from django.urls import path
 from .views import (
     RegisterView, VendorSignUpView, InitialAdminSignUpView, AdminSignUpView,
@@ -7,7 +5,13 @@ from .views import (
     RefreshTokenView, LogoutView, ForgotPasswordView, VerifyResetOTPView,
     ResetPasswordConfirmView, ChangePasswordView, Enable2FAView,
     Verify2FAView, MeView, ResendOTPView, GoogleLoginView, GoogleCallbackView,
-    AppleLoginView, AppleCallbackView, MyReferralCodeView,CompleteVendorProfileView
+    AppleLoginView, AppleCallbackView, MyReferralCodeView,
+    CompleteVendorProfileView,
+
+    # নতুন API গুলো
+    VendorProfileUpdateRequestView,
+    api_approve_vendor_update,
+    api_reject_vendor_update,
 )
 
 urlpatterns = [
@@ -15,6 +19,12 @@ urlpatterns = [
     path('vendor-signup/', VendorSignUpView.as_view(), name='vendor_signup'),
     path('complete-vendor-profile/', CompleteVendorProfileView.as_view(), name='complete_vendor_profile'),
 
+    # এই ৩টা লাইন ঠিক করা হয়েছে — api/ সরিয়ে দিয়েছি
+    path('vendor/update-request/', VendorProfileUpdateRequestView.as_view(), name='vendor_update_request'),
+    path('admin/approve-update/<int:request_id>/', api_approve_vendor_update, name='admin_approve_update'),
+    path('admin/reject-update/<int:request_id>/', api_reject_vendor_update, name='admin_reject_update'),
+
+    # বাকি সব পুরানো URL
     path('initial-admin-signup/', InitialAdminSignUpView.as_view(), name='initial_admin_signup'),
     path('admin-signup/', AdminSignUpView.as_view(), name='admin_signup'),
     path('users/<int:user_id>/', AdminUserManagementView.as_view(), name='user_management_detail'),
@@ -33,16 +43,11 @@ urlpatterns = [
     path('verify-2fa/', Verify2FAView.as_view(), name='verify_2fa'),
     path('me/', MeView.as_view(), name='me'),
     path('resend-otp/', ResendOTPView.as_view(), name='resend_otp'),
-
-    # তোমার নতুন API
     path('my-referral-code/', MyReferralCodeView.as_view(), name='my_referral_code'),
 
-    # Google Login
+    # Google & Apple
     path('auth/google/', GoogleLoginView.as_view(), name='google_login'),
     path('auth/google/callback/', GoogleCallbackView.as_view(), name='google_callback'),
-
-    # Apple Login — এখানে / শুরুতে না দিয়ে শুধু path দাও
     path('apple/login/', AppleLoginView.as_view(), name='apple_login'),
     path('apple/login/callback/', AppleCallbackView.as_view(), name='apple_callback'),
-    
 ]
