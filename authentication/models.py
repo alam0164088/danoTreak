@@ -21,13 +21,13 @@ class UserManager(BaseUserManager):
         email = self.normalize_email(email)
         user = self.model(email=email, **extra_fields)
 
-        # If user signed up using a referral code
+        # Referral code handling
         if referral_code:
             try:
                 referrer = User.objects.get(referral_code__iexact=referral_code.strip())
                 user.referred_by = referrer
             except User.DoesNotExist:
-                pass  #
+                pass
 
         user.set_password(password)
         user.save(using=self._db)
@@ -43,6 +43,9 @@ class UserManager(BaseUserManager):
 # USER MODEL
 # --------------------------
 class User(AbstractUser):
+    # এই লাইনটা যোগ করা হয়েছে — username ফিল্ড পুরোপুরি বন্ধ!
+    username = None
+
     ROLE_CHOICES = (
         ('admin', 'Admin'),
         ('user', 'User'),
@@ -70,13 +73,8 @@ class User(AbstractUser):
     created_at = models.DateTimeField(auto_now_add=True)
     otp_attempts = models.PositiveIntegerField(default=0)
 
-    # -------------------------------
-    # ⭐ NEW: REFERRAL SYSTEM
-    # -------------------------------
+    # Referral System
     referral_code = models.CharField(max_length=20, unique=True, blank=True, null=True)
-
-
-
     referred_by = models.ForeignKey(
         "self",
         on_delete=models.SET_NULL,
@@ -84,17 +82,15 @@ class User(AbstractUser):
         blank=True,
         related_name="referrals"
     )
-    # -------------------------------
 
     USERNAME_FIELD = 'email'
-    REQUIRED_FIELDS = []  # Removed username
+    REQUIRED_FIELDS = []
 
     objects = UserManager()
 
     def __str__(self):
         return self.email
 
-        # Generate referral code automatically
     def generate_referral_code(self):
         while True:
             code = "REF" + ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
@@ -121,6 +117,37 @@ class User(AbstractUser):
         self.password_reset_code_expires_at = timezone.now() + timedelta(minutes=15)
         self.save(update_fields=['password_reset_code', 'password_reset_code_expires_at'])
         return code
+
+# --------------------------
+# FINAL VENDOR MODEL (সব ফিচার সহ)
+# --------------------------
+class Vendor(models.Model):
+    CATEGORY_CHOICES = [
+        ('food', 'Food'),
+        ('beverage', 'Beverage'),
+        ('nightlife', 'Nightlife'),
+        ('grocery', 'Grocery'),
+        ('pharmacy', 'Pharmacy'),
+        ('electronics', 'Electronics'),
+        ('fashion', 'Fashion'),
+        ('others', 'Others'),
+    ]
+
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='vendor_profile')
+    vendor_name = models.CharField(max_length=100, default="N/A")
+    shop_name = models.CharField(max_length=150, default="N/A")
+    phone_number = models.CharField(max_length=15, default="N/A")
+    shop_address = models.TextField(default="N/A")
+    category = models.CharField(max_length=20, choices=CATEGORY_CHOICES, default='others')
+
+    latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    shop_images = models.JSONField(default=list, blank=True)
+    is_profile_complete = models.BooleanField(default=False)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
 
 
 # --------------------------
@@ -174,21 +201,6 @@ class Profile(models.Model):
             last_count = Profile.objects.count() + 1
             self.employee_id = f"EMP{last_count:03d}"
         super().save(*args, **kwargs)
-
-
-# --------------------------
-# VENDOR MODEL
-# --------------------------
-class Vendor(models.Model):
-    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='vendor')
-    business_name = models.CharField(max_length=255)
-    location = models.CharField(max_length=255)
-    geofence_radius = models.FloatField(default=100.0)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    def __str__(self):
-        return f"{self.business_name} ({self.user.email})"
 
 
 # --------------------------

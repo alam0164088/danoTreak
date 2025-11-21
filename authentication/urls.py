@@ -7,12 +7,14 @@ from .views import (
     RefreshTokenView, LogoutView, ForgotPasswordView, VerifyResetOTPView,
     ResetPasswordConfirmView, ChangePasswordView, Enable2FAView,
     Verify2FAView, MeView, ResendOTPView, GoogleLoginView, GoogleCallbackView,
-    AppleLoginView, AppleCallbackView, MyReferralCodeView
+    AppleLoginView, AppleCallbackView, MyReferralCodeView,CompleteVendorProfileView
 )
 
 urlpatterns = [
     path('register/', RegisterView.as_view(), name='register'),
     path('vendor-signup/', VendorSignUpView.as_view(), name='vendor_signup'),
+    path('complete-vendor-profile/', CompleteVendorProfileView.as_view(), name='complete_vendor_profile'),
+
     path('initial-admin-signup/', InitialAdminSignUpView.as_view(), name='initial_admin_signup'),
     path('admin-signup/', AdminSignUpView.as_view(), name='admin_signup'),
     path('users/<int:user_id>/', AdminUserManagementView.as_view(), name='user_management_detail'),
@@ -42,4 +44,5 @@ urlpatterns = [
     # Apple Login — এখানে / শুরুতে না দিয়ে শুধু path দাও
     path('apple/login/', AppleLoginView.as_view(), name='apple_login'),
     path('apple/login/callback/', AppleCallbackView.as_view(), name='apple_callback'),
+    
 ]

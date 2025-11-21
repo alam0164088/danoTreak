@@ -16,6 +16,8 @@ from rest_framework.decorators import api_view
 from jose import jwt
 import requests
 import os
+import re
+
 from datetime import timedelta
 from django.http import HttpResponseRedirect, JsonResponse
 from .models import Token, Profile, PasswordResetSession, Vendor
@@ -809,3 +811,104 @@ class MyReferralCodeView(APIView):
             "success": True,
             "data": serializer.data
         }, status=status.HTTP_200_OK)
+    
+
+
+
+
+# ============================
+# VENDOR PROFILE COMPLETION
+# ============================
+class CompleteVendorProfileView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if request.user.role != 'vendor':
+            return Response({"success": False, "message": "Access denied"}, status=403)
+
+        try:
+            vendor = request.user.vendor_profile
+            if vendor.is_profile_complete:
+                return Response({
+                    "success": True,
+                    "profile_complete": True,
+                    "vendor": {
+                        "vendor_name": vendor.vendor_name,
+                        "shop_name": vendor.shop_name,
+                        "phone_number": vendor.phone_number,
+                        "shop_address": vendor.shop_address,
+                        "category": vendor.category,
+                        "latitude": str(vendor.latitude) if vendor.latitude else None,
+                        "longitude": str(vendor.longitude) if vendor.longitude else None,
+                        "shop_images": vendor.shop_images
+                    }
+                })
+            else:
+                return Response({
+                    "success": True,
+                    "profile_complete": False,
+                    "message": "Complete your shop profile to continue"
+                })
+        except Vendor.DoesNotExist:
+            return Response({
+                "success": True,
+                "profile_complete": False,
+                "message": "Please set up your shop first"
+            })
+
+    def post(self, request):
+        if request.user.role != 'vendor':
+            return Response({"success": False, "message": "Access denied"}, status=403)
+
+        data = request.data
+
+        # ভ্যালিডেশন
+        required = ['vendor_name', 'shop_name', 'phone_number', 'shop_address', 'category', 'latitude', 'longitude']
+        for field in required:
+            if not data.get(field):
+                return Response({"success": False, "message": f"{field} is required"}, status=400)
+
+        # ফোন নাম্বার চেক (বাংলাদেশ ফরম্যাট)
+        phone = data['phone_number']
+        if not re.match(r"^01[3-9]\d{8}$", phone):
+            if phone.startswith("+880"):
+                phone = "0" + phone[4:]
+            if not re.match(r"^01[3-9]\d{8}$", phone):
+                return Response({"success": False, "message": "Invalid BD phone number"}, status=400)
+
+        # ল্যাট-লং চেক
+        try:
+            lat = float(data['latitude'])
+            lng = float(data['longitude'])
+            if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+                raise ValueError
+        except:
+            return Response({"success": False, "message": "Invalid latitude/longitude"}, status=400)
+
+        # ছবি (অপশনাল, কিন্তু লিস্ট হতে হবে)
+        shop_images = data.get('shop_images', [])
+        if not isinstance(shop_images, list):
+            shop_images = []
+
+        # সেভ করা
+        vendor, created = Vendor.objects.update_or_create(
+            user=request.user,
+            defaults={
+                'vendor_name': data['vendor_name'],
+                'shop_name': data['shop_name'],
+                'phone_number': phone,
+                'shop_address': data['shop_address'],
+                'category': data['category'],
+                'latitude': lat,
+                'longitude': lng,
+                'shop_images': shop_images,
+                'is_profile_complete': True
+            }
+        )
+
+        return Response({
+            "success": True,
+            "message": "দোকানের প্রোফাইল সফলভাবে তৈরি হয়েছে!",
+            "profile_complete": True,
+            "shop_name": vendor.shop_name
+        }, status=200)
