@@ -148,7 +148,33 @@ class Vendor(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+# authentication/models.py → Vendor মডেলের নিচে যোগ করো
 
+class VendorProfileUpdateRequest(models.Model):
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('approved', 'Approved'),
+        ('rejected', 'Rejected'),
+    ]
+
+    vendor = models.ForeignKey(Vendor, on_delete=models.CASCADE, related_name='update_requests')
+    requested_by = models.ForeignKey(User, on_delete=models.CASCADE)
+
+    # যে ফিল্ডগুলো চেঞ্জ করতে চায়, সেগুলো এখানে সেভ হবে
+    new_data = models.JSONField()  # সব ডাটা JSON এ সেভ হবে
+
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='pending')
+    reviewed_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='reviewed_requests')
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    reason = models.TextField(blank=True, null=True)  # রিজেক্ট হলে কারণ
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.vendor.shop_name} - {self.status}"
+
+    class Meta:
+        ordering = ['-created_at']
 
 # --------------------------
 # TOKEN MODEL
