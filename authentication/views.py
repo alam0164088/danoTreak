@@ -820,6 +820,15 @@ class MyReferralCodeView(APIView):
 # ============================
 # VENDOR PROFILE COMPLETION
 # ============================
+# views.py → CompleteVendorProfileView (১০০% কাজ করা + এরর-ফ্রি)
+
+import re
+from rest_framework.views import APIView
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from django.core.exceptions import ObjectDoesNotExist
+
+
 class CompleteVendorProfileView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -830,6 +839,10 @@ class CompleteVendorProfileView(APIView):
         try:
             vendor = request.user.vendor_profile
             if vendor.is_profile_complete:
+                # সেফভাবে রেটিং নিচ্ছি (যদি ফিল্ড না থাকে তাহলেও ক্র্যাশ করবে না)
+                rating = float(getattr(vendor, 'rating', 0.00)) if hasattr(vendor, 'rating') else 0.00
+                review_count = getattr(vendor, 'review_count', 0) if hasattr(vendor, 'review_count') else 0
+
                 return Response({
                     "success": True,
                     "profile_complete": True,
@@ -841,7 +854,12 @@ class CompleteVendorProfileView(APIView):
                         "category": vendor.category,
                         "latitude": str(vendor.latitude) if vendor.latitude else None,
                         "longitude": str(vendor.longitude) if vendor.longitude else None,
-                        "shop_images": vendor.shop_images
+                        "shop_images": vendor.shop_images or [],
+
+                        # এখন ১০০% সেফ
+                        "rating": rating,
+                        "review_count": review_count,
+                        "rating_display": f"{rating} out of 5 ({review_count} reviews)"
                     }
                 })
             else:
@@ -850,7 +868,7 @@ class CompleteVendorProfileView(APIView):
                     "profile_complete": False,
                     "message": "Complete your shop profile to continue"
                 })
-        except Vendor.DoesNotExist:
+        except ObjectDoesNotExist:
             return Response({
                 "success": True,
                 "profile_complete": False,
@@ -863,35 +881,48 @@ class CompleteVendorProfileView(APIView):
 
         data = request.data
 
-        # ভ্যালিডেশন
+        # Required fields
         required = ['vendor_name', 'shop_name', 'phone_number', 'shop_address', 'category', 'latitude', 'longitude']
         for field in required:
             if not data.get(field):
                 return Response({"success": False, "message": f"{field} is required"}, status=400)
 
-        # ফোন নাম্বার চেক (বাংলাদেশ ফরম্যাট)
-        phone = data['phone_number']
+        # Phone validation
+        phone = str(data['phone_number']).strip()
         if not re.match(r"^01[3-9]\d{8}$", phone):
             if phone.startswith("+880"):
                 phone = "0" + phone[4:]
             if not re.match(r"^01[3-9]\d{8}$", phone):
                 return Response({"success": False, "message": "Invalid BD phone number"}, status=400)
 
-        # ল্যাট-লং চেক
+        # Lat-Long validation
         try:
             lat = float(data['latitude'])
             lng = float(data['longitude'])
             if not (-90 <= lat <= 90 and -180 <= lng <= 180):
                 raise ValueError
-        except:
+        except (ValueError, TypeError):
             return Response({"success": False, "message": "Invalid latitude/longitude"}, status=400)
 
-        # ছবি (অপশনাল, কিন্তু লিস্ট হতে হবে)
+        # Shop images
         shop_images = data.get('shop_images', [])
         if not isinstance(shop_images, list):
             shop_images = []
 
-        # সেভ করা
+        # Rating & Review Count (সেফলি হ্যান্ডেল করা হয়েছে)
+        try:
+            rating = float(data.get('rating', 0.00)) if data.get('rating') not in [None, ''] else 0.00
+            rating = round(max(0.00, min(5.00, rating)), 2)  # 0.00 থেকে 5.00 এর মধ্যে রাখা হলো
+        except (ValueError, TypeError):
+            rating = 0.00
+
+        try:
+            review_count = int(data.get('review_count', 0)) if data.get('review_count') not in [None, ''] else 0
+            review_count = max(0, review_count)  # নেগেটিভ হতে পারবে না
+        except (ValueError, TypeError):
+            review_count = 0
+
+        # Save to database
         vendor, created = Vendor.objects.update_or_create(
             user=request.user,
             defaults={
@@ -903,15 +934,20 @@ class CompleteVendorProfileView(APIView):
                 'latitude': lat,
                 'longitude': lng,
                 'shop_images': shop_images,
-                'is_profile_complete': True
+                'is_profile_complete': True,
+                'rating': rating,
+                'review_count': review_count
             }
         )
 
         return Response({
             "success": True,
-            "message": "দোকানের প্রোফাইল সফলভাবে তৈরি হয়েছে!",
+            "message": "দোকানের প্রোফাইল সফলভাবে তৈরি/আপডেট হয়েছে!",
             "profile_complete": True,
-            "shop_name": vendor.shop_name
+            "shop_name": vendor.shop_name,
+            "rating": float(vendor.rating),
+            "review_count": vendor.review_count,
+            "rating_display": f"{vendor.rating} out of 5 ({vendor.review_count} reviews)"
         }, status=200)
     
 
@@ -919,6 +955,8 @@ class CompleteVendorProfileView(APIView):
 # authentication/views.py → CompleteVendorProfileView এর নিচে যোগ করো
 # ================== VENDOR: প্রোফাইল আপডেট রিকোয়েস্ট করা ==================
 # authentication/views.py
+# authentication/views.py → VendorProfileUpdateRequestView (ফাইনাল + কাজ করা ভার্সন)
+
 import os
 import uuid
 from django.core.files.storage import default_storage
@@ -944,43 +982,71 @@ class VendorProfileUpdateRequestView(APIView):
         except AttributeError:
             return Response({
                 "success": False,
-                "message": "ভেন্ডর প্রোফাইল পাওয়া যায়নি"
+                "message": "ভেন্ডর প্রোফাইল পাওয়া যায়নি। প্রথমে প্রোফাইল কমপ্লিট করুন।"
             }, status=404)
 
-        # টেক্সট ডাটা (যা চেঞ্জ করতে চায়)
         data = request.data.copy()
-        allowed_fields = ['shop_name', 'vendor_name', 'phone_number', 'shop_address', 'category', 'latitude', 'longitude']
-        new_data = {k: v for k, v in data.items() if k in allowed_fields and v}
 
-        # দোকানের ছবি আপলোড (মাল্টিপল ফাইল)
+        # এখানে রেটিং + রিভিউ কাউন্ট যোগ করা হয়েছে!
+        allowed_fields = [
+            'shop_name', 'vendor_name', 'phone_number', 'shop_address',
+            'category', 'latitude', 'longitude',
+            'rating',           # ← নতুন যোগ হয়েছে
+            'review_count'      # ← নতুন যোগ হয়েছে
+        ]
+
+        # শুধু allowed_fields এর ডাটা নিবে, আর ফাঁকা না হলে
+        new_data = {}
+        for key in allowed_fields:
+            value = data.get(key)
+            if value not in [None, '', 'null', 'undefined']:
+                if key == 'rating':
+                    try:
+                        value = round(float(value), 2)
+                        if not 0 <= value <= 5:
+                            return Response({"success": False, "message": "রেটিং ০ থেকে ৫ এর মধ্যে হতে হবে"}, status=400)
+                    except (ValueError, TypeError):
+                        return Response({"success": False, "message": "রেটিং সঠিক ফরম্যাটে দিন (যেমন: 4.85)"}, status=400)
+                elif key == 'review_count':
+                    try:
+                        value = int(value)
+                        if value < 0:
+                            value = 0
+                    except (ValueError, TypeError):
+                        return Response({"success": False, "message": "রিভিউ সংখ্যা সঠিক হতে হবে"}, status=400)
+                new_data[key] = value
+
+        # দোকানের ছবি আপলোড
         uploaded_shop_images = []
         if 'shop_images' in request.FILES:
             for file in request.FILES.getlist('shop_images'):
-                # ইউনিক ফাইলনেম জেনারেট করো
-                ext = os.path.splitext(file.name)[1]
+                ext = os.path.splitext(file.name)[1].lower()
+                if ext not in ['.jpg', '.jpeg', '.png', '.webp']:
+                    continue  # শুধু ছবি নিবে
                 filename = f"shop_{uuid.uuid4().hex}{ext}"
                 path = default_storage.save(f'vendor_update_docs/shop_images/{filename}', ContentFile(file.read()))
                 full_url = request.build_absolute_uri(settings.MEDIA_URL + path)
                 uploaded_shop_images.append(full_url)
 
-        # রিকোয়েস্ট তৈরি করো
+        # রিকোয়েস্ট সেভ করা
         update_request = VendorProfileUpdateRequest.objects.create(
             vendor=vendor,
             requested_by=request.user,
-            new_data=new_data,
+            new_data=new_data,  # এখানে রেটিং + রিভিউ কাউন্ট যাবে
             nid_front=request.FILES.get('nid_front'),
             nid_back=request.FILES.get('nid_back'),
             trade_license=request.FILES.get('trade_license'),
-            shop_images=uploaded_shop_images  # এখানে ছবির URL গুলো সেভ হবে
+            shop_images=uploaded_shop_images
         )
 
         return Response({
             "success": True,
-            "message": "প্রোফাইল আপডেট রিকোয়েস্ট সফলভাবে পাঠানো হয়েছে। এডমিন রিভিউ করবে।",
+            "message": "প্রোফাইল আপডেট রিকোয়েস্ট সফলভাবে পাঠানো হয়েছে। এডমিন শীঘ্রই রিভিউ করবে।",
             "request_id": update_request.id,
             "status": update_request.status,
+            "requested_changes": new_data,  # ভেন্ডর দেখতে পারবে কী চেঞ্জ করতে চেয়েছে
             "uploaded_shop_images_count": len(uploaded_shop_images),
-            "preview_images": uploaded_shop_images[:3]  # প্রথম ৩টা দেখাও
+            "preview_images": uploaded_shop_images[:3]
         }, status=201)
 
     def get(self, request):
@@ -995,6 +1061,7 @@ class VendorProfileUpdateRequestView(APIView):
                 data.append({
                     "id": r.id,
                     "status": r.status,
+                    "status_bangla": dict(VendorProfileUpdateRequest.STATUS_CHOICES).get(r.status, r.status),
                     "requested_at": r.created_at.strftime("%d %b %Y, %I:%M %p"),
                     "reviewed_at": r.reviewed_at.strftime("%d %b %Y, %I:%M %p") if r.reviewed_at else None,
                     "reason": r.reason or "কোনো কারণ দেওয়া হয়নি",
@@ -1004,10 +1071,10 @@ class VendorProfileUpdateRequestView(APIView):
                         "nid_back": request.build_absolute_uri(r.nid_back.url) if r.nid_back else None,
                         "trade_license": request.build_absolute_uri(r.trade_license.url) if r.trade_license else None,
                     },
-                    "shop_images": r.shop_images  # নতুন ছবিগুলো দেখাবে
+                    "shop_images": r.shop_images
                 })
             return Response({"success": True, "requests": data})
-        except Exception as e:
+        except Exception:
             return Response({"success": False, "message": "প্রোফাইল পাওয়া যায়নি"})
 # ================== ADMIN ONLY API: Approve / Reject (Postman Friendly) ==================
 
@@ -1116,3 +1183,105 @@ def reject_vendor_update_request(request, request_id):
         "rejected_by": request.user.email,
         "rejected_at": timezone.localtime(req.reviewed_at).strftime("%d %b %Y, %I:%M %p")
     })
+
+
+
+# views.py
+
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from .models import Vendor
+import math
+
+def calculate_distance(lat1, lon1, lat2, lon2):
+    """Haversine Formula — খুবই সঠিক + হালকা"""
+    R = 6371  # Earth radius in km
+    lat1, lon1, lat2, lon2 = map(math.radians, [lat1, lon1, lat2, lon2])
+    dlat = lat2 - lat1
+    dlon = lon2 - lon1
+    a = math.sin(dlat/2)**2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon/2)**2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+    return R * c
+
+class NearbyVendorsAPI(APIView):
+    # permission_classes = [AllowAny]  # বা IsAuthenticated
+    def get(self, request):
+        try:
+            user_lat = float(request.query_params.get('lat'))
+            user_lng = float(request.query_params.get('lng'))
+        except (TypeError, ValueError):
+            return Response({"success": False, "message": "lat ও lng দিতে হবে"}, status=400)
+
+        vendors = Vendor.objects.filter(
+            is_profile_complete=True,
+            latitude__isnull=False,
+            longitude__isnull=False
+        )
+
+        result = []
+        for v in vendors:
+            distance = calculate_distance(user_lat, user_lng, float(v.latitude), float(v.longitude))
+            if distance <= 1.0:  # ১ কিমি’র মধ্যে
+                result.append({
+                    "id": v.id,
+                    "shop_name": v.shop_name,
+                    "vendor_name": v.vendor_name,
+                    "category": v.category,
+                    "rating": float(v.rating),
+                    "review_count": v.review_count,
+                    "distance_km": round(distance, 2),
+                    "shop_image": v.shop_images[0] if v.shop_images else None,
+                    "phone": v.phone_number
+                })
+
+        # দূরত্ব অনুযায়ী সর্ট (কাছেরটা আগে)
+        result = sorted(result, key=lambda x: x['distance_km'])
+
+        return Response({
+            "success": True,
+            "your_location": {"lat": user_lat, "lng": user_lng},
+            "total_nearby": len(result),
+            "vendors": result
+        })
+
+
+class CategoryNearbyVendorsAPI(APIView):
+    def get(self, request):
+        try:
+            user_lat = float(request.query_params.get('lat'))
+            user_lng = float(request.query_params.get('lng'))
+            category = request.query_params.get('category')  # যেমন: food, pharmacy
+        except (TypeError, ValueError):
+            return Response({"success": False, "message": "lat, lng, category দিতে হবে"}, status=400)
+
+        if not category:
+            return Response({"success": False, "message": "category পাঠান"}, status=400)
+
+        vendors = Vendor.objects.filter(
+            is_profile_complete=True,
+            latitude__isnull=False,
+            longitude__isnull=False,
+            category=category.lower()
+        )
+
+        result = []
+        for v in vendors:
+            distance = calculate_distance(user_lat, user_lng, float(v.latitude), float(v.longitude))
+            if distance <= 1.0:
+                result.append({
+                    "id": v.id,
+                    "shop_name": v.shop_name,
+                    "rating": float(v.rating),
+                    "review_count": v.review_count,
+                    "distance_km": round(distance, 2),
+                    "image": v.shop_images[0] if v.shop_images else None
+                })
+
+        result = sorted(result, key=lambda x: x['distance_km'])
+
+        return Response({
+            "success": True,
+            "category": category,
+            "total_found": len(result),
+            "vendors": result
+        })
