@@ -11,9 +11,7 @@ from .views import (
     CompleteVendorProfileView,
 
     # নতুন ভিউ
-    VendorProfileUpdateRequestView,
-    approve_vendor_update_request,   # এই নাম ঠিক
-    reject_vendor_update_request,    # এই নাম ঠিক
+    VendorProfileUpdateRequestView,approve_vendor_update_request,   reject_vendor_update_request, NearbyVendorsAPI, CategoryNearbyVendorsAPI
 )
 
 urlpatterns = [
@@ -27,6 +25,8 @@ urlpatterns = [
     # এডমিন এপ্রুভ/রিজেক্ট
     path('admin/approve-update/<int:request_id>/', approve_vendor_update_request, name='admin_approve_update'),
     path('admin/reject-update/<int:request_id>/', reject_vendor_update_request, name='admin_reject_update'),
+    path('api/nearby-vendors/', NearbyVendorsAPI.as_view(), name='nearby-vendors'),
+    path('api/nearby-category/', CategoryNearbyVendorsAPI.as_view(), name='nearby-category'),
 
     # বাকি সব URL
     path('initial-admin-signup/', InitialAdminSignUpView.as_view(), name='initial_admin_signup'),

@@ -122,17 +122,11 @@ class User(AbstractUser):
 # FINAL VENDOR MODEL (সব ফিচার সহ)
 # --------------------------
 # models.py (যেখানে Vendor মডেল আছে)
-
 class Vendor(models.Model):
     CATEGORY_CHOICES = [
-        ('food', 'Food'),
-        ('beverage', 'Beverage'),
-        ('nightlife', 'Nightlife'),
-        ('grocery', 'Grocery'),
-        ('pharmacy', 'Pharmacy'),
-        ('electronics', 'Electronics'),
-        ('fashion', 'Fashion'),
-        ('others', 'Others'),
+        ('food', 'Food'), ('beverage', 'Beverage'), ('nightlife', 'Nightlife'),
+        ('grocery', 'Grocery'), ('pharmacy', 'Pharmacy'), ('electronics', 'Electronics'),
+        ('fashion', 'Fashion'), ('others', 'Others'),
     ]
 
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='vendor_profile')
@@ -147,17 +141,19 @@ class Vendor(models.Model):
     shop_images = models.JSONField(default=list, blank=True)
     is_profile_complete = models.BooleanField(default=False)
 
-    # এই ৩টা ফিল্ড এখন যোগ করো (আগে ছিল না!)
     nid_front = models.ImageField(upload_to='vendor_docs/nid/', null=True, blank=True)
     nid_back = models.ImageField(upload_to='vendor_docs/nid/', null=True, blank=True)
     trade_license = models.FileField(upload_to='vendor_docs/license/', null=True, blank=True)
+
+    # এই দুইটা লাইন যোগ করো (এটাই ছিল মূল সমস্যা!)
+    rating = models.DecimalField(max_digits=3, decimal_places=2, default=0.00)
+    review_count = models.PositiveIntegerField(default=0)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
         return self.shop_name
-
 # authentication/models.py → Vendor মডেলের নিচে যোগ করো
 
 
@@ -192,6 +188,7 @@ class VendorProfileUpdateRequest(models.Model):
     )
     reviewed_at = models.DateTimeField(null=True, blank=True)
     reason = models.TextField(blank=True, null=True)
+  
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -201,6 +198,8 @@ class VendorProfileUpdateRequest(models.Model):
 
     class Meta:
         ordering = ['-created_at']
+
+
 
 
 
