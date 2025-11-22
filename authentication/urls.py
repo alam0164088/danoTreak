@@ -1,3 +1,5 @@
+# authentication/urls.py
+
 from django.urls import path
 from .views import (
     RegisterView, VendorSignUpView, InitialAdminSignUpView, AdminSignUpView,
@@ -8,10 +10,10 @@ from .views import (
     AppleLoginView, AppleCallbackView, MyReferralCodeView,
     CompleteVendorProfileView,
 
-    # নতুন API গুলো
+    # নতুন ভিউ
     VendorProfileUpdateRequestView,
-    api_approve_vendor_update,
-    api_reject_vendor_update,
+    approve_vendor_update_request,   # এই নাম ঠিক
+    reject_vendor_update_request,    # এই নাম ঠিক
 )
 
 urlpatterns = [
@@ -19,12 +21,14 @@ urlpatterns = [
     path('vendor-signup/', VendorSignUpView.as_view(), name='vendor_signup'),
     path('complete-vendor-profile/', CompleteVendorProfileView.as_view(), name='complete_vendor_profile'),
 
-    # এই ৩টা লাইন ঠিক করা হয়েছে — api/ সরিয়ে দিয়েছি
+    # ভেন্ডর আপডেট রিকোয়েস্ট
     path('vendor/update-request/', VendorProfileUpdateRequestView.as_view(), name='vendor_update_request'),
-    path('admin/approve-update/<int:request_id>/', api_approve_vendor_update, name='admin_approve_update'),
-    path('admin/reject-update/<int:request_id>/', api_reject_vendor_update, name='admin_reject_update'),
 
-    # বাকি সব পুরানো URL
+    # এডমিন এপ্রুভ/রিজেক্ট
+    path('admin/approve-update/<int:request_id>/', approve_vendor_update_request, name='admin_approve_update'),
+    path('admin/reject-update/<int:request_id>/', reject_vendor_update_request, name='admin_reject_update'),
+
+    # বাকি সব URL
     path('initial-admin-signup/', InitialAdminSignUpView.as_view(), name='initial_admin_signup'),
     path('admin-signup/', AdminSignUpView.as_view(), name='admin_signup'),
     path('users/<int:user_id>/', AdminUserManagementView.as_view(), name='user_management_detail'),

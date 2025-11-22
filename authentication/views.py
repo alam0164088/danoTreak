@@ -918,32 +918,69 @@ class CompleteVendorProfileView(APIView):
 
 # authentication/views.py → CompleteVendorProfileView এর নিচে যোগ করো
 # ================== VENDOR: প্রোফাইল আপডেট রিকোয়েস্ট করা ==================
+# authentication/views.py
+import os
+import uuid
+from django.core.files.storage import default_storage
+from django.core.files.base import ContentFile
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
+from rest_framework.permissions import IsAuthenticated
+
+
 class VendorProfileUpdateRequestView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
         if request.user.role != 'vendor':
-            return Response({"success": False, "message": "শুধুমাত্র ভেন্ডর প্রোফাইল আপডেট করতে পারবে"}, status=403)
+            return Response({
+                "success": False,
+                "message": "শুধুমাত্র ভেন্ডর এই কাজ করতে পারবে"
+            }, status=403)
 
         try:
-            vendor = request.user.vendor_profile  # assuming OneToOne relation
+            vendor = request.user.vendor_profile
         except AttributeError:
-            return Response({"success": False, "message": "ভেন্ডর প্রোফাইল পাওয়া যায়নি"}, status=404)
+            return Response({
+                "success": False,
+                "message": "ভেন্ডর প্রোফাইল পাওয়া যায়নি"
+            }, status=404)
 
+        # টেক্সট ডাটা (যা চেঞ্জ করতে চায়)
         data = request.data.copy()
+        allowed_fields = ['shop_name', 'vendor_name', 'phone_number', 'shop_address', 'category', 'latitude', 'longitude']
+        new_data = {k: v for k, v in data.items() if k in allowed_fields and v}
 
-        # রিকোয়েস্ট সেভ করি
+        # দোকানের ছবি আপলোড (মাল্টিপল ফাইল)
+        uploaded_shop_images = []
+        if 'shop_images' in request.FILES:
+            for file in request.FILES.getlist('shop_images'):
+                # ইউনিক ফাইলনেম জেনারেট করো
+                ext = os.path.splitext(file.name)[1]
+                filename = f"shop_{uuid.uuid4().hex}{ext}"
+                path = default_storage.save(f'vendor_update_docs/shop_images/{filename}', ContentFile(file.read()))
+                full_url = request.build_absolute_uri(settings.MEDIA_URL + path)
+                uploaded_shop_images.append(full_url)
+
+        # রিকোয়েস্ট তৈরি করো
         update_request = VendorProfileUpdateRequest.objects.create(
             vendor=vendor,
             requested_by=request.user,
-            new_data=data
+            new_data=new_data,
+            nid_front=request.FILES.get('nid_front'),
+            nid_back=request.FILES.get('nid_back'),
+            trade_license=request.FILES.get('trade_license'),
+            shop_images=uploaded_shop_images  # এখানে ছবির URL গুলো সেভ হবে
         )
 
         return Response({
             "success": True,
-            "message": "প্রোফাইল আপডেটের জন্য রিকোয়েস্ট পাঠানো হয়েছে। এডমিন রিভিউ করবে।",
+            "message": "প্রোফাইল আপডেট রিকোয়েস্ট সফলভাবে পাঠানো হয়েছে। এডমিন রিভিউ করবে।",
             "request_id": update_request.id,
-            "status": "pending"
+            "status": update_request.status,
+            "uploaded_shop_images_count": len(uploaded_shop_images),
+            "preview_images": uploaded_shop_images[:3]  # প্রথম ৩টা দেখাও
         }, status=201)
 
     def get(self, request):
@@ -961,72 +998,121 @@ class VendorProfileUpdateRequestView(APIView):
                     "requested_at": r.created_at.strftime("%d %b %Y, %I:%M %p"),
                     "reviewed_at": r.reviewed_at.strftime("%d %b %Y, %I:%M %p") if r.reviewed_at else None,
                     "reason": r.reason or "কোনো কারণ দেওয়া হয়নি",
+                    "new_data": r.new_data,
+                    "documents": {
+                        "nid_front": request.build_absolute_uri(r.nid_front.url) if r.nid_front else None,
+                        "nid_back": request.build_absolute_uri(r.nid_back.url) if r.nid_back else None,
+                        "trade_license": request.build_absolute_uri(r.trade_license.url) if r.trade_license else None,
+                    },
+                    "shop_images": r.shop_images  # নতুন ছবিগুলো দেখাবে
                 })
-            return Response({"success": True, "update_requests": data})
-        except:
+            return Response({"success": True, "requests": data})
+        except Exception as e:
             return Response({"success": False, "message": "প্রোফাইল পাওয়া যায়নি"})
-
-
 # ================== ADMIN ONLY API: Approve / Reject (Postman Friendly) ==================
+
+
+# ================== ADMIN ONLY: Approve / Reject Vendor Update Request (100% Working) ==================
+
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
+from django.core.files import File
+import os
 
-# কাস্টম চেক: শুধুমাত্র role = 'admin' হলে চলবে
+
 def admin_only(user):
-    return user.is_authenticated and getattr(user, 'role', None) == 'admin'
+    return user.is_authenticated and user.role == 'admin'
+
+
+def copy_uploaded_file(source_field, target_field):
+    """সঠিকভাবে ফাইল কপি করে (যা আগে কাজ করত না)"""
+    if not source_field:
+        return
+
+    # পুরানো ফাইল মুছে ফেলো
+    if target_field:
+        target_field.delete(save=False)
+
+    try:
+        source_field.open('rb')  # ফাইল ওপেন করা জরুরি
+        file_name = os.path.basename(source_field.name)
+        target_field.save(file_name, File(source_field), save=False)
+    finally:
+        source_field.close()
+
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
-def api_approve_vendor_update(request, request_id):
+def approve_vendor_update_request(request, request_id):
     if not admin_only(request.user):
-        return Response({"success": False, "message": "শুধুমাত্র এডমিন এই কাজ করতে পারে"}, status=403)
+        return Response({
+            "success": False,
+            "message": "শুধুমাত্র এডমিন এই কাজ করতে পারবে"
+        }, status=403)
 
-    update_req = get_object_or_404(VendorProfileUpdateRequest, id=request_id, status='pending')
-    vendor = update_req.vendor
+    req = get_object_or_404(VendorProfileUpdateRequest, id=request_id, status='pending')
+    vendor = req.vendor
 
-    # নতুন ডাটা প্রয়োগ করো
-    for field, value in update_req.new_data.items():
+    # টেক্সট ডাটা আপডেট
+    for field, value in req.new_data.items():
         if hasattr(vendor, field):
             setattr(vendor, field, value)
+
+    # NID, NID Back, Trade License কপি করো
+    copy_uploaded_file(req.nid_front, vendor.nid_front)
+    copy_uploaded_file(req.nid_back, vendor.nid_back)
+    copy_uploaded_file(req.trade_license, vendor.trade_license)
+
+    # দোকানের ছবি আপডেট করো (এটাই আগে মিস করেছিলে!)
+    if req.shop_images and isinstance(req.shop_images, list):
+        vendor.shop_images = req.shop_images  # এই লাইনটা যোগ করো
+
+    # সব শেষে সেভ করো
     vendor.save()
 
-    # রিকোয়েস্ট স্ট্যাটাস আপডেট
-    update_req.status = 'approved'
-    update_req.reviewed_by = request.user
-    update_req.reviewed_at = timezone.now()
-    update_req.save()
+    # রিকোয়েস্ট স্ট্যাটাস
+    req.status = 'approved'
+    req.reviewed_by = request.user
+    req.reviewed_at = timezone.now()
+    req.save()
 
     return Response({
         "success": True,
-        "message": "ভেন্ডর প্রোফাইল সফলভাবে আপডেট করা হয়েছে!",
-        "request_id": update_req.id,
+        "message": "ভেন্ডর প্রোফাইল সম্পূর্ণ আপডেট হয়েছে! দোকানের ছবি, NID, ট্রেড লাইসেন্স সব আপডেট হয়েছে",
         "shop_name": vendor.shop_name,
-        "approved_by": request.user.email
-    }, status=200)
+        "shop_images_count": len(vendor.shop_images),
+        "documents_updated": bool(req.nid_front or req.nid_back or req.trade_license),
+        "approved_by": request.user.email,
+        "approved_at": timezone.localtime(req.reviewed_at).strftime("%d %b %Y, %I:%M %p")
+    })
 
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
-def api_reject_vendor_update(request, request_id):
+def reject_vendor_update_request(request, request_id):
     if not admin_only(request.user):
-        return Response({"success": False, "message": "শুধুমাত্র এডমিন এই কাজ করতে পারে"}, status=403)
+        return Response({
+            "success": False,
+            "message": "শুধুমাত্র এডমিন এই কাজ করতে পারবে"
+        }, status=403)
 
-    update_req = get_object_or_404(VendorProfileUpdateRequest, id=request_id, status='pending')
-    reason = request.data.get('reason', 'কোনো কারণ দেওয়া হয়নি')
+    req = get_object_or_404(VendorProfileUpdateRequest, id=request_id, status='pending')
+    
+    reason = request.data.get('reason', 'কোনো কারণ উল্লেখ করা হয়নি')
 
-    update_req.status = 'rejected'
-    update_req.reviewed_by = request.user
-    update_req.reviewed_at = timezone.now()
-    update_req.reason = reason
-    update_req.save()
+    req.status = 'rejected'
+    req.reviewed_by = request.user
+    req.reviewed_at = timezone.now()
+    req.reason = reason
+    req.save()
 
     return Response({
         "success": True,
-        "message": "প্রোফাইল আপডেট রিজেক্ট করা হয়েছে",
-        "request_id": update_req.id,
+        "message": "প্রোফাইল আপডেট রিকোয়েস্ট রিজেক্ট করা হয়েছে",
         "reason": reason,
-        "rejected_by": request.user.email
-    }, status=200)
+        "rejected_by": request.user.email,
+        "rejected_at": timezone.localtime(req.reviewed_at).strftime("%d %b %Y, %I:%M %p")
+    })
