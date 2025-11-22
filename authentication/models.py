@@ -121,6 +121,8 @@ class User(AbstractUser):
 # --------------------------
 # FINAL VENDOR MODEL (সব ফিচার সহ)
 # --------------------------
+# models.py (যেখানে Vendor মডেল আছে)
+
 class Vendor(models.Model):
     CATEGORY_CHOICES = [
         ('food', 'Food'),
@@ -145,10 +147,24 @@ class Vendor(models.Model):
     shop_images = models.JSONField(default=list, blank=True)
     is_profile_complete = models.BooleanField(default=False)
 
+    # এই ৩টা ফিল্ড এখন যোগ করো (আগে ছিল না!)
+    nid_front = models.ImageField(upload_to='vendor_docs/nid/', null=True, blank=True)
+    nid_back = models.ImageField(upload_to='vendor_docs/nid/', null=True, blank=True)
+    trade_license = models.FileField(upload_to='vendor_docs/license/', null=True, blank=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    def __str__(self):
+        return self.shop_name
+
 # authentication/models.py → Vendor মডেলের নিচে যোগ করো
+
+
+# --------------------------
+# VENDOR PROFILE UPDATE REQUEST
+# --------------------------
+# authentication/models.py বা vendors/models.py
 
 class VendorProfileUpdateRequest(models.Model):
     STATUS_CHOICES = [
@@ -159,22 +175,34 @@ class VendorProfileUpdateRequest(models.Model):
 
     vendor = models.ForeignKey(Vendor, on_delete=models.CASCADE, related_name='update_requests')
     requested_by = models.ForeignKey(User, on_delete=models.CASCADE)
+    shop_images = models.JSONField(default=list, blank=True, null=True)
 
-    # যে ফিল্ডগুলো চেঞ্জ করতে চায়, সেগুলো এখানে সেভ হবে
-    new_data = models.JSONField()  # সব ডাটা JSON এ সেভ হবে
+    # শুধু টেক্সট/নাম্বার/বুলিয়ান ডাটা এখানে
+    new_data = models.JSONField(blank=True, default=dict)
+
+    # ফাইলগুলো আলাদা ফিল্ডে
+    nid_front = models.ImageField(upload_to='vendor_update_docs/nid/', null=True, blank=True)
+    nid_back = models.ImageField(upload_to='vendor_update_docs/nid/', null=True, blank=True)
+    trade_license = models.FileField(upload_to='vendor_update_docs/license/', null=True, blank=True)
 
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='pending')
-    reviewed_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='reviewed_requests')
+    reviewed_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='reviewed_vendor_requests'
+    )
     reviewed_at = models.DateTimeField(null=True, blank=True)
-    reason = models.TextField(blank=True, null=True)  # রিজেক্ট হলে কারণ
+    reason = models.TextField(blank=True, null=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
         return f"{self.vendor.shop_name} - {self.status}"
 
     class Meta:
         ordering = ['-created_at']
+
+
 
 # --------------------------
 # TOKEN MODEL
