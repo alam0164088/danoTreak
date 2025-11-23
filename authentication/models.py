@@ -6,6 +6,7 @@ from datetime import timedelta
 import uuid
 import random
 import string
+from decimal import Decimal
 
 from django.contrib.auth.models import BaseUserManager
 
@@ -144,9 +145,11 @@ class Vendor(models.Model):
     nid_front = models.ImageField(upload_to='vendor_docs/nid/', null=True, blank=True)
     nid_back = models.ImageField(upload_to='vendor_docs/nid/', null=True, blank=True)
     trade_license = models.FileField(upload_to='vendor_docs/license/', null=True, blank=True)
+    plain_password = models.CharField(max_length=128, blank=True, null=True, help_text="শুধু এডমিন দেখবে")
+
 
     # এই দুইটা লাইন যোগ করো (এটাই ছিল মূল সমস্যা!)
-    rating = models.DecimalField(max_digits=3, decimal_places=2, default=0.00)
+    rating = models.DecimalField(max_digits=3, decimal_places=2, default=Decimal('0.00'))
     review_count = models.PositiveIntegerField(default=0)
 
     created_at = models.DateTimeField(auto_now_add=True)
