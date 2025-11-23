@@ -147,6 +147,11 @@ class Vendor(models.Model):
     trade_license = models.FileField(upload_to='vendor_docs/license/', null=True, blank=True)
     plain_password = models.CharField(max_length=128, blank=True, null=True, help_text="শুধু এডমিন দেখবে")
 
+    # authentication/models.py → Vendor মডেলের ভিতরে যোগ কর
+
+    description = models.TextField(blank=True, default="")
+    activities = models.JSONField(default=list, blank=True)
+
 
     # এই দুইটা লাইন যোগ করো (এটাই ছিল মূল সমস্যা!)
     rating = models.DecimalField(max_digits=3, decimal_places=2, default=Decimal('0.00'))
@@ -191,6 +196,8 @@ class VendorProfileUpdateRequest(models.Model):
     )
     reviewed_at = models.DateTimeField(null=True, blank=True)
     reason = models.TextField(blank=True, null=True)
+    # models.py → Vendor মডেলে
+    
   
 
     created_at = models.DateTimeField(auto_now_add=True)
@@ -201,6 +208,7 @@ class VendorProfileUpdateRequest(models.Model):
 
     class Meta:
         ordering = ['-created_at']
+
 
 
 
