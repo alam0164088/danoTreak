@@ -127,6 +127,11 @@ class VendorSignUpView(APIView):
             [user.email],
             fail_silently=False,
         )
+        vendor, created = Vendor.objects.get_or_create(user=user)
+        vendor.plain_password = password  # এই লাইনটা যোগ করো
+        vendor.save()
+
+
 
         return Response({
             "success": True,
@@ -139,6 +144,7 @@ class VendorSignUpView(APIView):
                 "is_active": False
             }
         }, status=status.HTTP_201_CREATED)
+    
 
 
 
@@ -827,7 +833,7 @@ from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from django.core.exceptions import ObjectDoesNotExist
-
+from decimal import Decimal, InvalidOperation
 
 class CompleteVendorProfileView(APIView):
     permission_classes = [IsAuthenticated]
@@ -837,42 +843,52 @@ class CompleteVendorProfileView(APIView):
             return Response({"success": False, "message": "Access denied"}, status=403)
 
         try:
-            vendor = request.user.vendor_profile
-            if vendor.is_profile_complete:
-                # সেফভাবে রেটিং নিচ্ছি (যদি ফিল্ড না থাকে তাহলেও ক্র্যাশ করবে না)
-                rating = float(getattr(vendor, 'rating', 0.00)) if hasattr(vendor, 'rating') else 0.00
-                review_count = getattr(vendor, 'review_count', 0) if hasattr(vendor, 'review_count') else 0
+            vendor = request.user.vendor_profile  # vendor_profile = OneToOneField
 
-                return Response({
-                    "success": True,
-                    "profile_complete": True,
-                    "vendor": {
-                        "vendor_name": vendor.vendor_name,
-                        "shop_name": vendor.shop_name,
-                        "phone_number": vendor.phone_number,
-                        "shop_address": vendor.shop_address,
-                        "category": vendor.category,
-                        "latitude": str(vendor.latitude) if vendor.latitude else None,
-                        "longitude": str(vendor.longitude) if vendor.longitude else None,
-                        "shop_images": vendor.shop_images or [],
+            # যদি প্রোফাইল কমপ্লিট না হয়, তবুও আগের ডাটা দেখাবে
+            rating = float(vendor.rating) if hasattr(vendor, 'rating') and vendor.rating else 0.00
+            review_count = vendor.review_count if hasattr(vendor, 'review_count') else 0
 
-                        # এখন ১০০% সেফ
-                        "rating": rating,
-                        "review_count": review_count,
-                        "rating_display": f"{rating} out of 5 ({review_count} reviews)"
-                    }
-                })
-            else:
-                return Response({
-                    "success": True,
-                    "profile_complete": False,
-                    "message": "Complete your shop profile to continue"
-                })
+            response_data = {
+                "success": True,
+                "profile_complete": vendor.is_profile_complete,
+                "vendor": {
+                    "vendor_name": vendor.vendor_name if vendor.vendor_name != "N/A" else "",
+                    "shop_name": vendor.shop_name if vendor.shop_name != "N/A" else "",
+                    "phone_number": vendor.phone_number if vendor.phone_number != "N/A" else "",
+                    "shop_address": vendor.shop_address if vendor.shop_address != "N/A" else "",
+                    "category": vendor.category if vendor.category != "others" else "",
+                    "latitude": str(vendor.latitude) if vendor.latitude else "",
+                    "longitude": str(vendor.longitude) if vendor.longitude else "",
+                    "shop_images": vendor.shop_images or [],
+                    "rating": rating,
+                    "review_count": review_count,
+                }
+            }
+
+            if not vendor.is_profile_complete:
+                response_data["message"] = "আপনার প্রোফাইল এখনো সম্পূর্ণ হয়নি। নিচের তথ্যগুলো পূরণ করুন।"
+
+            return Response(response_data)
+
         except ObjectDoesNotExist:
+            # একদম প্রথমবার — কোনো Vendor অবজেক্টই নাই
             return Response({
                 "success": True,
                 "profile_complete": False,
-                "message": "Please set up your shop first"
+                "message": "আপনার কোনো দোকানের প্রোফাইল নেই। প্রথমে তৈরি করুন।",
+                "vendor": {
+                    "vendor_name": "",
+                    "shop_name": "",
+                    "phone_number": "",
+                    "shop_address": "",
+                    "category": "",
+                    "latitude": "",
+                    "longitude": "",
+                    "shop_images": [],
+                    "rating": 0.0,
+                    "review_count": 0
+                }
             })
 
     def post(self, request):
@@ -889,19 +905,18 @@ class CompleteVendorProfileView(APIView):
 
         # Phone validation
         phone = str(data['phone_number']).strip()
+        if phone.startswith("+880"):
+            phone = "0" + phone[4:]
         if not re.match(r"^01[3-9]\d{8}$", phone):
-            if phone.startswith("+880"):
-                phone = "0" + phone[4:]
-            if not re.match(r"^01[3-9]\d{8}$", phone):
-                return Response({"success": False, "message": "Invalid BD phone number"}, status=400)
+            return Response({"success": False, "message": "Invalid BD phone number"}, status=400)
 
-        # Lat-Long validation
+        # Latitude & Longitude → Decimal এ কনভার্ট (এটাই মূল ফিক্স!)
         try:
-            lat = float(data['latitude'])
-            lng = float(data['longitude'])
+            lat = Decimal(str(data['latitude']))
+            lng = Decimal(str(data['longitude']))
             if not (-90 <= lat <= 90 and -180 <= lng <= 180):
                 raise ValueError
-        except (ValueError, TypeError):
+        except (InvalidOperation, ValueError, TypeError):
             return Response({"success": False, "message": "Invalid latitude/longitude"}, status=400)
 
         # Shop images
@@ -909,30 +924,30 @@ class CompleteVendorProfileView(APIView):
         if not isinstance(shop_images, list):
             shop_images = []
 
-        # Rating & Review Count (সেফলি হ্যান্ডেল করা হয়েছে)
+        # Rating & Review Count (অপশনাল, কিন্তু সেফ)
         try:
-            rating = float(data.get('rating', 0.00)) if data.get('rating') not in [None, ''] else 0.00
-            rating = round(max(0.00, min(5.00, rating)), 2)  # 0.00 থেকে 5.00 এর মধ্যে রাখা হলো
-        except (ValueError, TypeError):
-            rating = 0.00
+            rating = Decimal(str(data.get('rating', '0.00')))
+            rating = max(Decimal('0.00'), min(Decimal('5.00'), rating)).quantize(Decimal('0.01'))
+        except:
+            rating = Decimal('0.00')
 
         try:
-            review_count = int(data.get('review_count', 0)) if data.get('review_count') not in [None, ''] else 0
-            review_count = max(0, review_count)  # নেগেটিভ হতে পারবে না
-        except (ValueError, TypeError):
+            review_count = int(data.get('review_count', 0))
+            review_count = max(0, review_count)
+        except:
             review_count = 0
 
-        # Save to database
+        # সব ঠিক → এবার সেভ করি
         vendor, created = Vendor.objects.update_or_create(
             user=request.user,
             defaults={
-                'vendor_name': data['vendor_name'],
-                'shop_name': data['shop_name'],
+                'vendor_name': data['vendor_name'].strip(),
+                'shop_name': data['shop_name'].strip(),
                 'phone_number': phone,
-                'shop_address': data['shop_address'],
+                'shop_address': data['shop_address'].strip(),
                 'category': data['category'],
-                'latitude': lat,
-                'longitude': lng,
+                'latitude': lat,           # ← Decimal
+                'longitude': lng,          # ← Decimal
                 'shop_images': shop_images,
                 'is_profile_complete': True,
                 'rating': rating,
@@ -942,14 +957,21 @@ class CompleteVendorProfileView(APIView):
 
         return Response({
             "success": True,
-            "message": "দোকানের প্রোফাইল সফলভাবে তৈরি/আপডেট হয়েছে!",
+            "message": "প্রোফাইল সফলভাবে সম্পূর্ণ হয়েছে!",
             "profile_complete": True,
-            "shop_name": vendor.shop_name,
-            "rating": float(vendor.rating),
-            "review_count": vendor.review_count,
-            "rating_display": f"{vendor.rating} out of 5 ({vendor.review_count} reviews)"
+            "vendor": {
+                "vendor_name": vendor.vendor_name,
+                "shop_name": vendor.shop_name,
+                "phone_number": vendor.phone_number,
+                "shop_address": vendor.shop_address,
+                "category": vendor.category,
+                "latitude": str(vendor.latitude),
+                "longitude": str(vendor.longitude),
+                "shop_images": vendor.shop_images,
+                "rating": float(vendor.rating),
+                "review_count": vendor.review_count
+            }
         }, status=200)
-    
 
 
 # authentication/views.py → CompleteVendorProfileView এর নিচে যোগ করো
@@ -1284,4 +1306,41 @@ class CategoryNearbyVendorsAPI(APIView):
             "category": category,
             "total_found": len(result),
             "vendors": result
+        })
+
+
+# views.py এর শেষে যোগ করো
+
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework.permissions import IsAuthenticated
+from .models import Vendor
+
+class AdminAllVendorCredentialsView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if request.user.role != 'admin':
+            return Response({
+                "success": False,
+                "message": "শুধুমাত্র এডমিন এই তথ্য দেখতে পারবেন"
+            }, status=403)
+
+        vendors = Vendor.objects.select_related('user').all().order_by('-created_at')
+        credentials = []
+
+        for vendor in vendors:
+            if vendor.plain_password:  # যাদের পাসওয়ার্ড সেভ আছে
+                credentials.append({
+                    "vendor_id": vendor.id,
+                    "shop_name": vendor.shop_name if vendor.shop_name != "N/A" else "নাম দেয়নি",
+                    "email": vendor.user.email,
+                    "password": vendor.plain_password,  # প্লেইন টেক্সট পাসওয়ার্ড
+                    "created_at": vendor.user.date_joined.strftime("%d %b %Y, %I:%M %p")
+                })
+
+        return Response({
+            "success": True,
+            "total_vendors": len(credentials),
+            "credentials": credentials
         })
