@@ -208,6 +208,22 @@ class VendorProfileUpdateRequest(models.Model):
 
     class Meta:
         ordering = ['-created_at']
+        
+
+
+# models.py
+
+class FavoriteVendor(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='favorite_vendors')
+    vendor = models.ForeignKey(Vendor, on_delete=models.CASCADE, related_name='favorited_by')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('user', 'vendor')  # একই ভেন্ডর একবারই ফেভারিট করা যাবে
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.user.email} ❤️ {self.vendor.shop_name}"
 
 
 

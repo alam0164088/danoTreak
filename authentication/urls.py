@@ -11,11 +11,14 @@ from .views import (
     CompleteVendorProfileView,
 
     # নতুন ভিউ
-    VendorProfileUpdateRequestView,approve_vendor_update_request,   reject_vendor_update_request, NearbyVendorsAPI, CategoryNearbyVendorsAPI,AdminAllVendorCredentialsView
+    VendorProfileUpdateRequestView,approve_vendor_update_request,   reject_vendor_update_request, NearbyVendorsAPI, CategoryNearbyVendorsAPI,AdminAllVendorCredentialsView,ToggleFavoriteVendor,MyFavoriteVendorsAPI
 )
 
 urlpatterns = [
     path('register/', RegisterView.as_view(), name='register'),
+
+    path('toggle-favorite/', ToggleFavoriteVendor.as_view(), name='toggle-favorite'),
+    path('my-favorites/', MyFavoriteVendorsAPI.as_view(), name='my-favorites'),
     path('vendor-signup/', VendorSignUpView.as_view(), name='vendor_signup'),
     path('complete-vendor-profile/', CompleteVendorProfileView.as_view(), name='complete_vendor_profile'),
 

@@ -1429,3 +1429,71 @@ class AdminAllVendorCredentialsView(APIView):
             "total_vendors": len(credentials),
             "credentials": credentials
         })
+    
+
+
+from .models import FavoriteVendor
+
+# favorite add 
+
+# views.py
+# ================== ফেভারিট ভেন্ডর টগল (Love বাটন) ==================
+class ToggleFavoriteVendor(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        vendor_id = request.data.get('vendor_id')
+        if not vendor_id:
+            return Response({"success": False, "message": "vendor_id দিন"}, status=400)
+
+        try:
+            vendor = Vendor.objects.get(id=vendor_id)
+        except Vendor.DoesNotExist:
+            return Response({"success": False, "message": "দোকান পাওয়া যায়নি"}, status=404)
+
+        favorite = FavoriteVendor.objects.filter(user=request.user, vendor=vendor).first()
+
+        if favorite:
+            favorite.delete()
+            is_favorite = False
+            message = "ফেভারিট থেকে সরানো হয়েছে"
+        else:
+            FavoriteVendor.objects.create(user=request.user, vendor=vendor)
+            is_favorite = True
+            message = "ফেভারিটে যোগ করা হয়েছে"
+
+        return Response({
+            "success": True,
+            "message": message,
+            "is_favorite": is_favorite,
+            "total_favorites": vendor.favorited_by.count()
+        })
+
+
+# ================== আমার সব ফেভারিট ভেন্ডর দেখা ==================
+class MyFavoriteVendorsAPI(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        favorites = FavoriteVendor.objects.filter(user=request.user).select_related('vendor')
+        
+        vendor_list = []
+        for fav in favorites:
+            v = fav.vendor
+            vendor_list.append({
+                "id": v.id,
+                "shop_name": v.shop_name,
+                "vendor_name": v.vendor_name,
+                "category": v.category,
+                "rating": float(v.rating),
+                "review_count": v.review_count,
+                "shop_image": v.shop_images[0] if v.shop_images else None,
+                "phone": v.phone_number,
+                "added_at": fav.created_at.strftime("%d %b %Y")
+            })
+
+        return Response({
+            "success": True,
+            "total_favorites": len(vendor_list),
+            "my_favorites": vendor_list
+        })
