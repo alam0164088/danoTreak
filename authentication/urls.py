@@ -1,4 +1,4 @@
-# authentication/urls.py
+# authentication/urls.py   ← পুরো ফাইলটা এমন করো
 
 from django.urls import path
 from .views import (
@@ -6,38 +6,38 @@ from .views import (
     AdminUserManagementView, SendOTPView, VerifyOTPView, LoginView,
     RefreshTokenView, LogoutView, ForgotPasswordView, VerifyResetOTPView,
     ResetPasswordConfirmView, ChangePasswordView, Enable2FAView,
-    Verify2FAView, MeView, ResendOTPView, GoogleLoginView, GoogleCallbackView,
-    AppleLoginView, AppleCallbackView, MyReferralCodeView,
-    CompleteVendorProfileView,
-
-    # নতুন ভিউ
-    VendorProfileUpdateRequestView,approve_vendor_update_request,   reject_vendor_update_request, NearbyVendorsAPI, CategoryNearbyVendorsAPI,AdminAllVendorCredentialsView,ToggleFavoriteVendor,MyFavoriteVendorsAPI
+    Verify2FAView, MeView, ResendOTPView,
+    GoogleLoginView, GoogleCallbackView, AppleLoginView,  # AppleCallbackView নেই!
+    MyReferralCodeView, CompleteVendorProfileView,
+    VendorProfileUpdateRequestView, approve_vendor_update_request,
+    reject_vendor_update_request, NearbyVendorsAPI, CategoryNearbyVendorsAPI,
+    AdminAllVendorCredentialsView, ToggleFavoriteVendor, MyFavoriteVendorsAPI,
 )
 
 urlpatterns = [
     path('register/', RegisterView.as_view(), name='register'),
-
-    path('toggle-favorite/', ToggleFavoriteVendor.as_view(), name='toggle-favorite'),
-    path('my-favorites/', MyFavoriteVendorsAPI.as_view(), name='my-favorites'),
     path('vendor-signup/', VendorSignUpView.as_view(), name='vendor_signup'),
     path('complete-vendor-profile/', CompleteVendorProfileView.as_view(), name='complete_vendor_profile'),
 
-    # ভেন্ডর আপডেট রিকোয়েস্ট
+    # Vendor Update Requests
     path('vendor/update-request/', VendorProfileUpdateRequestView.as_view(), name='vendor_update_request'),
-
-    # এডমিন এপ্রুভ/রিজেক্ট
     path('admin/approve-update/<int:request_id>/', approve_vendor_update_request, name='admin_approve_update'),
     path('admin/reject-update/<int:request_id>/', reject_vendor_update_request, name='admin_reject_update'),
+
+    # Nearby & Favorites
+    path('toggle-favorite/', ToggleFavoriteVendor.as_view(), name='toggle-favorite'),
+    path('my-favorites-vendor/', MyFavoriteVendorsAPI.as_view(), name='my-favorites'),
     path('api/nearby-vendors/', NearbyVendorsAPI.as_view(), name='nearby-vendors'),
     path('api/nearby-category/', CategoryNearbyVendorsAPI.as_view(), name='nearby-category'),
-    path('admin/all-vendor-credentials/', AdminAllVendorCredentialsView.as_view(), name='all-vendor-credentials'),
 
-    # বাকি সব URL
+    # Admin
+    path('admin/all-vendor-credentials/', AdminAllVendorCredentialsView.as_view(), name='all-vendor-credentials'),
     path('initial-admin-signup/', InitialAdminSignUpView.as_view(), name='initial_admin_signup'),
     path('admin-signup/', AdminSignUpView.as_view(), name='admin_signup'),
     path('users/<int:user_id>/', AdminUserManagementView.as_view(), name='user_management_detail'),
     path('users/', AdminUserManagementView.as_view(), name='user_management_list'),
 
+    # Auth
     path('send-otp/', SendOTPView.as_view(), name='send_otp'),
     path('verify-otp/', VerifyOTPView.as_view(), name='verify_otp'),
     path('login/', LoginView.as_view(), name='login'),
@@ -53,9 +53,9 @@ urlpatterns = [
     path('resend-otp/', ResendOTPView.as_view(), name='resend_otp'),
     path('my-referral-code/', MyReferralCodeView.as_view(), name='my_referral_code'),
 
-    # Google & Apple
-    path('auth/google/', GoogleLoginView.as_view(), name='google_login'),
-    path('auth/google/callback/', GoogleCallbackView.as_view(), name='google_callback'),
-    path('apple/login/', AppleLoginView.as_view(), name='apple_login'),
-    path('apple/login/callback/', AppleCallbackView.as_view(), name='apple_callback'),
+    # Social Login
+    # Social Login – এখানে /auth/ যোগ করলাম
+    path("auth/google/login/", GoogleLoginView.as_view(), name="google_login"),
+    path("auth/google/callback/", GoogleCallbackView.as_view(), name="google_callback"),
+    path("auth/apple/login/", AppleLoginView.as_view(), name="apple_login"),
 ]
