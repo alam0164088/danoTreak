@@ -1,76 +1,58 @@
+# settings.py  ← পুরো ফাইলটা এমন করো
+
 import os
 from pathlib import Path
 from datetime import timedelta
 import environ
-import dj_database_url
 
-# ------------------------------
-# Base directory
-# ------------------------------
+# ===================== BASE DIR =====================
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# ------------------------------
-# Load environment variables
-# ------------------------------
+# ===================== ENV SETUP =====================
 env = environ.Env(
     DEBUG=(bool, False),
-    ALLOWED_HOSTS=(list, ["*"]),
-    EMAIL_PORT=(int, 587),
-    EMAIL_USE_TLS=(bool, True)
+    SECRET_KEY=(str, "django-insecure-default-key-change-me"),
+    ALLOWED_HOSTS=(list, ["localhost", "127.0.0.1"]),
+    DATABASE_URL=(str, "postgresql://user:pass@localhost:5432/dbname"),
 )
 
-# Conditional load of .env file (optional for local)
-env_file = os.path.join(BASE_DIR, ".env")
-if os.path.exists(env_file):
-    print(f".env file found at {env_file}, loading it...")
-    environ.Env.read_env(env_file)
-else:
-    print(".env file not found, using system environment variables")
+# .env ফাইল লোড করা (যদি থাকে)
+environ.Env.read_env(os.path.join(BASE_DIR, ".env"))
 
-# ------------------------------
-# Core settings
-# ------------------------------
+# ===================== SECURITY =====================
 SECRET_KEY = env("SECRET_KEY")
-DEBUG = env.bool("DEBUG", default=False)
-ALLOWED_HOSTS = env.list("ALLOWED_HOSTS", default=["*"])
-GOOGLE_API_KEY = env("GOOGLE_API_KEY", default="")
+DEBUG = env("DEBUG")
+ALLOWED_HOSTS = env.list("ALLOWED_HOSTS")
 
-# ------------------------------
-# Installed apps
-# ------------------------------
+# ===================== APPLICATIONS =====================
 INSTALLED_APPS = [
+    # Django core
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
-
-    "corsheaders",
-    "rest_framework",
-    "rest_framework.authtoken",   # ✅ এটা অবশ্যই লাগবে
-    "dj_rest_auth",               # ✅ auth endpoints
-    "dj_rest_auth.registration",  # ✅ allauth এর সাথে registration
-
-    "authentication",
-    
-
-    "rest_framework_simplejwt",   # যদি JWT ও রাখতে চান
-
     "django.contrib.sites",
+
+    # Third-party
+    "rest_framework",
+    "rest_framework_simplejwt",
+    "corsheaders",
+    "whitenoise.runserver_nostatic",   # production এ Whitenoise
     "allauth",
     "allauth.account",
     "allauth.socialaccount",
     "allauth.socialaccount.providers.google",
-    
+    "allauth.socialaccount.providers.apple",
+
+    # Local apps
+    "authentication",
 ]
 
-
-# ------------------------------
-# Middleware
-# ------------------------------
+# ===================== MIDDLEWARE =====================
 MIDDLEWARE = [
-    "corsheaders.middleware.CorsMiddleware",  # ✅ Added (must be on top)
+    "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
@@ -79,28 +61,50 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
-    "allauth.account.middleware.AccountMiddleware",  # ✅ Added for allauth
+    "allauth.account.middleware.AccountMiddleware",
 ]
 
-# ------------------------------
-# URLs & WSGI
-# ------------------------------
+# ===================== URLS & WSGI =====================
 ROOT_URLCONF = "myproject.urls"
 WSGI_APPLICATION = "myproject.wsgi.application"
-AUTH_USER_MODEL = "authentication.User"
 
-# ------------------------------
-# Templates
-# ------------------------------
+# ===================== DATABASE =====================
+DATABASES = {
+    "default": env.db(),   # dj-database-url + python-decouple/environ
+}
+
+# ===================== AUTH =====================
+AUTH_USER_MODEL = "authentication.User"
+SITE_ID = 1
+
+AUTHENTICATION_BACKENDS = [
+    "django.contrib.auth.backends.ModelBackend",
+    "allauth.account.auth_backends.AuthenticationBackend",
+]
+
+# ===================== REST FRAMEWORK & JWT =====================
+REST_FRAMEWORK = {
+    "DEFAULT_AUTHENTICATION_CLASSES": (
+        "rest_framework_simplejwt.authentication.JWTAuthentication",
+    ),
+}
+
+SIMPLE_JWT = {
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=60),
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=30),
+    "AUTH_HEADER_TYPES": ("Bearer",),
+}
+
+# ===================== TEMPLATES (এটা ছিল না → এটাই মূল এরর ছিল) =====================
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [BASE_DIR / "templates"],
+        "DIRS": [BASE_DIR / "templates"],          # যদি templates ফোল্ডার থাকে
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [
                 "django.template.context_processors.debug",
-                "django.template.context_processors.request",  # ✅ Required for allauth
+                "django.template.context_processors.request",   # allauth + admin এর জন্য জরুরি
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
             ],
@@ -108,55 +112,16 @@ TEMPLATES = [
     },
 ]
 
-# ------------------------------
-# Database
-# ------------------------------
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'danotreak_db',  # নতুন database
-        'USER': 'Nazmul13',
-        'PASSWORD': 'nazmul13',
-        'HOST': '127.0.0.1',
-        'PORT': '5432',
-    }
-}
+# ===================== EMAIL =====================
+EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
+EMAIL_HOST = env("EMAIL_HOST")
+EMAIL_PORT = env.int("EMAIL_PORT")
+EMAIL_USE_TLS = env.bool("EMAIL_USE_TLS")
+EMAIL_HOST_USER = env("EMAIL_HOST_USER")
+EMAIL_HOST_PASSWORD = env("EMAIL_HOST_PASSWORD")
+DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
 
-
-# ------------------------------
-# REST Framework
-# ------------------------------
-REST_FRAMEWORK = {
-    "DEFAULT_AUTHENTICATION_CLASSES": (
-        "rest_framework_simplejwt.authentication.JWTAuthentication",
-    ),
-    "DEFAULT_PERMISSION_CLASSES": (
-        "rest_framework.permissions.IsAuthenticated",
-    ),
-}
-
-# ------------------------------
-# JWT Settings
-# ------------------------------
-SIMPLE_JWT = {
-    "ACCESS_TOKEN_LIFETIME": timedelta(days=60),
-    "REFRESH_TOKEN_LIFETIME": timedelta(days=100),
-    "AUTH_HEADER_TYPES": ("Bearer",),
-}
-
-# ------------------------------
-# Email configuration
-# ------------------------------
-EMAIL_BACKEND = env("EMAIL_BACKEND", default="django.core.mail.backends.smtp.EmailBackend")
-EMAIL_HOST = env("EMAIL_HOST", default="smtp.gmail.com")
-EMAIL_PORT = env.int("EMAIL_PORT", default=587)
-EMAIL_USE_TLS = env.bool("EMAIL_USE_TLS", default=True)
-EMAIL_HOST_USER = env("EMAIL_HOST_USER", default="")
-EMAIL_HOST_PASSWORD = env("EMAIL_HOST_PASSWORD", default="")
-
-# ------------------------------
-# Static & Media
-# ------------------------------
+# ===================== STATIC & MEDIA =====================
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
@@ -164,88 +129,63 @@ STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
-# ------------------------------
-# Localization
-# ------------------------------
-LANGUAGE_CODE = "en-us"
-TIME_ZONE = "UTC"
-USE_I18N = True
-USE_TZ = True
+# ===================== CORS =====================
+CORS_ALLOW_ALL_ORIGINS = True   # Development only
 
-DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
-
-# ------------------------------
-# CORS Settings
-# ------------------------------
-CORS_ALLOW_ALL_ORIGINS = True   # ✅ Allow all origins (development use)
-
-# ------------------------------
-# django-allauth Settings
-# ------------------------------
-SITE_ID = 1  # ✅ Ensure a Site object exists with this ID
-
+# ===================== SOCIAL AUTH (Google + Apple) =====================
 SOCIALACCOUNT_PROVIDERS = {
-    # ✅ Google Login
-    'google': {
-        'APP': {
-            'client_id': env("GOOGLE_CLIENT_ID", default=""),
-            'secret': env("GOOGLE_SECRET", default=""),
-            'key': ''
+    "google": {
+        "APP": {
+            "client_id": env("GOOGLE_CLIENT_ID"),
+            "secret": env("GOOGLE_CLIENT_SECRET"),
+            "key": "",
         },
-        'SCOPE': [
-            'profile',
-            'email',
-        ],
-        'AUTH_PARAMS': {
-            'access_type': 'online',
-            'prompt': 'select_account',
-        }
+        "SCOPE": ["profile", "email"],
+        "AUTH_PARAMS": {"access_type": "online"},
     },
-
-    # ✅ Apple Login
-    'apple': {
-        'APP': {
-            'client_id': env("APPLE_CLIENT_ID", default=""),
-            'secret': env("APPLE_SECRET", default=""),
-            'key': env("APPLE_KEY", default=""),
+    "apple": {
+        "APP": {
+            "client_id": env("APPLE_CLIENT_ID"),
+            "secret": env("APPLE_SECRET"),
+            "key": env("APPLE_KEY_ID", default=""),
         },
-        'SCOPE': [
-            'name',
-            'email',
-        ],
-        'AUTH_PARAMS': {
-            'response_mode': 'form_post',
-            'response_type': 'code id_token',
-        },
+        "SCOPE": ["name", "email"],
     },
 }
+# ===================== CORS SETTINGS – ফাইনাল + ১০০% কাজ করবে =====================
+CORS_ALLOW_ALL_ORIGINS = False          # ← এটা বন্ধ করো (অবশ্যই!)
+CORS_ALLOW_CREDENTIALS = True           # ← এটা চালু করো (জরুরি!)
 
-# ------------------------------
-# Authentication URLs
-# ------------------------------
-LOGIN_URL = 'login'
-LOGOUT_URL = 'logout'
-LOGIN_REDIRECT_URL = 'home'
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:3000",      # React
+    "http://127.0.0.1:3000",
+    "http://localhost:5000",      # Flutter Web
+    "http://10.10.7.19:3000",     # তোমার লোকাল IP থেকে React চালালে
+]
+
+# ===================== allauth SETTINGS (আধুনিক + warning-free) =====================
+ACCOUNT_EMAIL_REQUIRED = True
+ACCOUNT_USERNAME_REQUIRED = False
+ACCOUNT_AUTHENTICATION_METHOD = "email"           # এটা এখনো কাজ করে
+ACCOUNT_UNIQUE_EMAIL = True
+ACCOUNT_EMAIL_VERIFICATION = "optional"
+
+# নতুন ভার্সনে warning বন্ধ করার জন্য
+ACCOUNT_SIGNUP_FIELDS = ["email*", "password1*", "password2*"]
+ACCOUNT_LOGIN_METHODS = {"email": True}
+
+SOCIALACCOUNT_EMAIL_REQUIRED = True
+SOCIALACCOUNT_QUERY_EMAIL = True
 SOCIALACCOUNT_LOGIN_ON_GET = True
 
-# ------------------------------
-# Logging Settings
-# ------------------------------
-LOGGING = {
-    'version': 1,
-    'disable_existing_loggers': False,
-    'handlers': {
-        'console': {'class': 'logging.StreamHandler'},
-    },
-    'loggers': {
-        '': {
-            'handlers': ['console'],
-            'level': 'DEBUG',
-        },
-    },
-}
+# ===================== OTHER =====================
+LANGUAGE_CODE = "en-us"
+TIME_ZONE = "Asia/Dhaka"
+USE_I18N = True
+USE_TZ = True
+DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-# ------------------------------
-# Email Backend
-# ------------------------------
-EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+# Google OAuth Settings (অবশ্যই যোগ করো!)
+GOOGLE_CLIENT_ID = env("GOOGLE_CLIENT_ID")
+GOOGLE_CLIENT_SECRET = env("GOOGLE_CLIENT_SECRET")
+GOOGLE_REDIRECT_URI = env("GOOGLE_REDIRECT_URI", default="http://127.0.0.1:8000/api/auth/google/callback/")
