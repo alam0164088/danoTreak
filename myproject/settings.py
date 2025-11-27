@@ -137,9 +137,10 @@ CORS_ALLOWED_ORIGINS = [
 ]
 
 # ===================== ALLAUTH =====================
-ACCOUNT_EMAIL_REQUIRED = True
-ACCOUNT_USERNAME_REQUIRED = False
-ACCOUNT_AUTHENTICATION_METHOD = "email"
+ACCOUNT_LOGIN_METHODS = {"email"}                      # নতুন + সঠিক
+ACCOUNT_SIGNUP_FIELDS = ["email*", "password1*", "password2*"]  # নতুন + সঠিক
+
+
 ACCOUNT_UNIQUE_EMAIL = True
 ACCOUNT_EMAIL_VERIFICATION = "optional"
 

@@ -79,12 +79,14 @@ class RegisterView(APIView):
 
 
 
+
 class VendorSignUpView(APIView):
     """
-    Vendor নিজে নিজে সাইনআপ করবে → শুধু ইমেইল + পাসওয়ার্ড
-    কোনো full_name, phone লাগবে না
+    ভেন্ডর নিজে নিজে সাইনআপ করবে → শুধু ইমেইল + পাসওয়ার্ড
+    → কোনো OTP ভেরিফাই লাগবে না
+    → is_active = False (এডমিন approve করলে active হবে)
     """
-    permission_classes = [AllowAny]  # কেউ লগইন না থাকলেও করতে পারবে
+    permission_classes = [AllowAny]
 
     def post(self, request):
         email = request.data.get('email')
@@ -110,33 +112,22 @@ class VendorSignUpView(APIView):
                 "message": "এই ইমেইল দিয়ে ইতিমধ্যে একাউন্ট আছে"
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        # ভেন্ডর ইউজার তৈরি করো (শুধু ইমেইল + পাসওয়ার্ড)
+        # ইউজার তৈরি করো (OTP ছাড়া)
         user = User.objects.create_user(
-            email=email.lower(),
+            email=email.lower().strip(),
             password=password,
             role='vendor',
-            is_active=False  # এডমিন অ্যাপ্রুভ করলে active হবে
+            is_active=False,           # এডমিন approve করার আগে লগিন করতে পারবে না
+            is_email_verified=True     # OTP নাই → তাই verified ধরে নিচ্ছি
         )
 
-        # OTP পাঠাও ইমেইল ভেরিফিকেশনের জন্য
-        code = user.generate_email_verification_code()
-        send_mail(
-            'ভেন্ডর একাউন্ট যাচাই করুন - DanoTreak',
-            f'আপনার ভেরিফিকেশন কোড: {code}\nএই কোড ৫ মিনিটের জন্য বৈধ।',
-            settings.DEFAULT_FROM_EMAIL,
-            [user.email],
-            fail_silently=False,
-        )
+        # Vendor প্রোফাইল তৈরি করো
         vendor, created = Vendor.objects.get_or_create(user=user)
-        vendor.plain_password = password  # এই লাইনটা যোগ করো
+        vendor.plain_password = password   # এডমিন যাতে দেখতে পারে
         vendor.save()
-
-
 
         return Response({
             "success": True,
-            "message": "ভেন্ডর একাউন্ট তৈরি হয়েছে! ইমেইল চেক করে OTP দিয়ে যাচাই করুন।",
-            "next_step": "verify_email_with_otp",
             "user": {
                 "id": user.id,
                 "email": user.email,
@@ -144,7 +135,6 @@ class VendorSignUpView(APIView):
                 "is_active": False
             }
         }, status=status.HTTP_201_CREATED)
-    
 
 
 
@@ -574,37 +564,78 @@ class Verify2FAView(APIView):
             return Response({"message": "2FA enabled successfully."}, status=status.HTTP_200_OK)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+
+
+
+# authentication/views.py
+
+import logging
+from django.db import transaction
+from django.utils.decorators import method_decorator
+from django.views.decorators.cache import never_cache
+
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
+from rest_framework.permissions import IsAuthenticated
+
+from .models import User, Profile
+from .serializers import UserProfileSerializer, ProfileUpdateSerializer
+
+logger = logging.getLogger(__name__)
+
+
+@method_decorator(never_cache, name='dispatch')   # পুরো ক্লাসের জন্য ক্যাশ বন্ধ
 class MeView(APIView):
-    """Handle user profile retrieval, update, and deletion."""
     permission_classes = [IsAuthenticated]
-    @method_decorator(never_cache)
+
     def get(self, request):
-        logger.debug(f"GET request for user: {request.user.email}")
-        serializer = UserProfileSerializer(request.user, context={'request': request})
+        # সবচেয়ে নিরাপদ উপায়: সবসময় ডাটাবেস থেকে ফ্রেশ ডাটা নাও
+        user = User.objects.select_related('profile').get(pk=request.user.pk)
+        serializer = UserProfileSerializer(user, context={'request': request})
         return Response(serializer.data, status=status.HTTP_200_OK)
+
     def put(self, request):
-        profile, created = Profile.objects.get_or_create(user=request.user)
-        logger.debug(f"PUT request for user: {request.user.email}, data: {request.data}")
-        serializer = ProfileUpdateSerializer(profile, data=request.data, context={'request': request}, partial=True)
-        if serializer.is_valid():
+        profile, _ = Profile.objects.get_or_create(user=request.user)
+
+        serializer = ProfileUpdateSerializer(
+            profile,
+            data=request.data,
+            context={'request': request},
+            partial=True
+        )
+
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        with transaction.atomic():
             serializer.save()
-            logger.info(f"Profile updated for user: {request.user.email}")
-            return Response({
-                "message": "Profile updated successfully.",
-                "user": UserProfileSerializer(request.user, context={'request': request}).data
-            }, status=status.HTTP_200_OK)
-        logger.error(f"Profile update failed for user: {request.user.email}, errors: {serializer.errors}")
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        # আপডেটের পর আবার ফ্রেশ ডাটা লোড করা হচ্ছে – কোনো ক্যাশ থাকবে না
+        fresh_user = User.objects.select_related('profile').get(pk=request.user.pk)
+
+        return Response({
+            "message": "Profile updated successfully.",
+            "user": UserProfileSerializer(fresh_user, context={'request': request}).data
+        }, status=status.HTTP_200_OK)
+
     def patch(self, request):
-        return self.put(request)
+        return self.put(request)   # PATCH = partial PUT
+
     def delete(self, request):
         password = request.data.get('current_password')
-        if password and not request.user.check_password(password):
+        if not password:
+            return Response({"detail": "Current password is required."}, status=status.HTTP_400_BAD_REQUEST)
+        if not request.user.check_password(password):
             return Response({"detail": "Current password incorrect."}, status=status.HTTP_400_BAD_REQUEST)
+
         email = request.user.email
         request.user.delete()
         logger.info(f"Account deleted: {email}")
-        return Response({"message": "Account deleted."}, status=status.HTTP_200_OK)
+        return Response({"message": "Account deleted successfully."}, status=status.HTTP_200_OK)
+    
+
+
 
 class ResendOTPView(APIView):
     """Resend verification OTP for email verification."""
@@ -1254,6 +1285,149 @@ class VendorProfileUpdateRequestView(APIView):
         
 
 
+
+# views.py এর মধ্যে যেকোনো জায়গায় যোগ করো (Admin section এর কাছে ভালো)
+# views.py তে যোগ করো
+
+# views.py তে যোগ করো (Admin section এর কাছে)
+
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework.permissions import IsAuthenticated
+from django.utils import timezone
+from datetime import timedelta
+
+
+class AdminPendingVendorUpdateRequestsView(APIView):
+    """
+    এডমিনের জন্য: শুধুমাত্র পেন্ডিং ভেন্ডর প্রোফাইল আপডেট রিকোয়েস্ট দেখা
+    → পুরানো vs নতুন ভ্যালু সাইড বাই সাইড
+    → বাংলা লেবেল, টাইম এগো, ডকুমেন্ট, ছবি সব
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if request.user.role != 'admin':
+            return Response({
+                "success": False,
+                "message": "শুধুমাত্র এডমিন এই তথ্য দেখতে পারবেন"
+            }, status=403)
+
+        # শুধু পেন্ডিং রিকোয়েস্ট
+        pending_requests = VendorProfileUpdateRequest.objects.filter(
+            status='pending'
+        ).select_related(
+            'vendor', 'vendor__user', 'requested_by'
+        ).order_by('-created_at')
+
+        total_pending = pending_requests.count()
+        request_list = []
+
+        for req in pending_requests:
+            vendor = req.vendor
+            new_data = req.new_data or {}
+            changes = []
+
+            # ফিল্ড ম্যাপিং: (বাংলা নাম, পুরানো ভ্যালু)
+            field_mapping = {
+                'vendor_name': ('ভেন্ডরের নাম', vendor.vendor_name or "খালি"),
+                'shop_name': ('দোকানের নাম', vendor.shop_name or "খালি"),
+                'phone_number': ('মোবাইল নম্বর', vendor.phone_number or "খালি"),
+                'shop_address': ('দোকানের ঠিকানা', vendor.shop_address or "খালি"),
+                'category': ('ক্যাটাগরি', vendor.category or "খালি"),
+                'description': ('বিবরণ', vendor.description or "খালি"),
+                'activities': ('কার্যক্রম', ", ".join(vendor.activities) if vendor.activities else "কিছু নেই"),
+                'rating': ('রেটিং', float(vendor.rating) if vendor.rating else 0.0),
+                'review_count': ('রিভিউ সংখ্যা', vendor.review_count if vendor.review_count else 0),
+            }
+
+            # প্রতিটি ফিল্ড চেক করি যেটা চেঞ্জ করতে চাইছে
+            for field_key, (bangla_name, old_value) in field_mapping.items():
+                if field_key in new_data:
+                    new_value = new_data[field_key]
+
+                    # activities লিস্ট হলে স্ট্রিং করি
+                    if field_key == 'activities' and isinstance(new_value, list):
+                        new_value = ", ".join(new_value) if new_value else "কিছু নেই"
+
+                    # রেটিং ফ্লোট করি
+                    if field_key == 'rating':
+                        try:
+                            new_value = float(new_value)
+                        except (ValueError, TypeError):
+                            new_value = old_value
+
+                    # পুরানো vs নতুন তুলনা
+                    old_str = str(old_value).strip()
+                    new_str = str(new_value).strip() if new_value is not None else ""
+
+                    changes.append({
+                        "field": bangla_name,
+                        "old": old_str if old_str != "খালি" else "খালি",
+                        "new": new_str if new_str else "খালি",
+                        "changed": old_str != new_str
+                    })
+
+            # ছবি চেক
+            new_images_count = len(req.shop_images) if req.shop_images else 0
+            old_images_count = len(vendor.shop_images) if vendor.shop_images else 0
+
+            # ডকুমেন্ট URL
+            documents = {
+                "nid_front": request.build_absolute_uri(req.nid_front.url) if req.nid_front else None,
+                "nid_back": request.build_absolute_uri(req.nid_back.url) if req.nid_back else None,
+                "trade_license": request.build_absolute_uri(req.trade_license.url) if req.trade_license else None,
+            }
+
+            request_list.append({
+                "request_id": req.id,
+                "vendor_id": vendor.id,
+                "vendor_email": vendor.user.email,
+                "shop_name": vendor.shop_name or "নাম দেয়নি",
+                "phone_number": vendor.phone_number or "দেয়নি",
+                "requested_by": req.requested_by.email,
+                "requested_at": req.created_at.strftime("%d %b %Y, %I:%M %p"),
+                "time_ago": self._time_ago(req.created_at),
+
+                # মূল জিনিস: পুরানো vs নতুন
+                "changes": changes,
+                "total_changes": len(changes),
+
+                # ছবি
+                "current_images": old_images_count,
+                "will_add_images": new_images_count,
+                "new_shop_images_preview": req.shop_images[:3] if req.shop_images else [],
+
+                # ডকুমেন্ট
+                "has_documents": bool(req.nid_front or req.nid_back or req.trade_license),
+                "documents": documents,
+            })
+
+        return Response({
+            "success": True,
+            "total_pending": total_pending,
+            "message": f"মোট {total_pending}টি পেন্ডিং রিকোয়েস্ট আছে" if total_pending else "কোনো পেন্ডিং রিকোয়েস্ট নেই",
+            "pending_requests": request_list
+        }, status=200)
+
+    # বোনাস: কতক্ষণ আগে রিকোয়েস্ট পাঠিয়েছে
+    def _time_ago(self, past_time):
+        now = timezone.now()
+        diff = now - past_time
+
+        if diff.days > 0:
+            return f"{diff.days} দিন আগে"
+        elif diff.seconds >= 7200:
+            return f"{diff.seconds // 3600} ঘণ্টা আগে"
+        elif diff.seconds >= 3600:
+            return "১ ঘণ্টা আগে"
+        elif diff.seconds >= 120:
+            return f"{diff.seconds // 60} মিনিট আগে"
+        elif diff.seconds >= 60:
+            return "১ মিনিট আগে"
+        else:
+            return "এইমাত্র"
+
 # ================== ADMIN ONLY API: Approve / Reject (Postman Friendly) ==================
 
 
@@ -1424,6 +1598,11 @@ class NearbyVendorsAPI(APIView):
             "total_nearby": len(result),
             "vendors": result
         })
+
+
+
+
+
 
 
 # ক্যাটাগরি অনুযায়ী নিকটস্থ দোকান (শুধু লগইন করলে)

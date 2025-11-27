@@ -109,47 +109,66 @@ class ResendOTPSerializer(serializers.Serializer):
     email = serializers.EmailField()
     purpose = serializers.ChoiceField(choices=['email_verification'])
 
+
+    
 class UserProfileSerializer(serializers.ModelSerializer):
     email_verified = serializers.BooleanField(source='is_email_verified', read_only=True)
     profile_image = serializers.SerializerMethodField()
+    phone = serializers.CharField(source='profile.phone', read_only=True)
 
     class Meta:
         model = User
-        fields = ['id', 'email', 'full_name', 'gender', 'email_verified', 'created_at', 'role', 'profile_image']
+        fields = [
+            'id',
+            'email',
+            'full_name',
+            'gender',
+            'phone',
+            'email_verified',
+            'created_at',
+            'role',
+            'profile_image'
+        ]
         read_only_fields = ['id', 'email', 'created_at', 'role']
 
     def get_profile_image(self, obj):
-        try:
-            profile = obj.profile
-            if profile.image:
-                return self.context['request'].build_absolute_uri(profile.image.url)
-        except Profile.DoesNotExist:
-            pass
-        return self.context['request'].build_absolute_uri('/media/profile_images/default_profile.png')
+        request = self.context.get('request')
+        profile = getattr(obj, 'profile', None)
+
+        if profile and profile.image:
+            return request.build_absolute_uri(profile.image.url)
+
+        return request.build_absolute_uri('/media/profile_images/default_profile.png')
+
+
+
 
 class ProfileUpdateSerializer(serializers.ModelSerializer):
     full_name = serializers.CharField(source='user.full_name', required=False)
     gender = serializers.CharField(source='user.gender', required=False)
-    image = serializers.ImageField(required=False)  # Added for image uploads
+    image = serializers.ImageField(required=False)
 
     class Meta:
         model = Profile
         fields = ['full_name', 'phone', 'gender', 'image']
 
     def update(self, instance, validated_data):
+        # nested user fields
         user_data = validated_data.pop('user', {})
-        full_name = user_data.get('full_name')
-        gender = user_data.get('gender')
 
-        if full_name:
-            instance.user.full_name = full_name
-        if gender:
-            instance.user.gender = gender
+        instance.user.full_name = user_data.get('full_name', instance.user.full_name)
+        instance.user.gender = user_data.get('gender', instance.user.gender)
         instance.user.save()
+
+        # profile fields
         instance.phone = validated_data.get('phone', instance.phone)
-        instance.image = validated_data.get('image', instance.image)
+        if 'image' in validated_data:
+            instance.image = validated_data.get('image')
         instance.save()
+
         return instance
+
+
 
 # class SubscriptionPlanSerializer(serializers.ModelSerializer):
 #     class Meta:
