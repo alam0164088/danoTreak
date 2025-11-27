@@ -11,7 +11,7 @@ from .views import (
     MyReferralCodeView, CompleteVendorProfileView,
     VendorProfileUpdateRequestView, approve_vendor_update_request,
     reject_vendor_update_request, NearbyVendorsAPI, CategoryNearbyVendorsAPI,
-    AdminAllVendorCredentialsView, ToggleFavoriteVendor, MyFavoriteVendorsAPI,
+    AdminAllVendorCredentialsView, ToggleFavoriteVendor, MyFavoriteVendorsAPI,AdminPendingVendorUpdateRequestsView
 )
 
 urlpatterns = [
@@ -23,6 +23,9 @@ urlpatterns = [
     path('vendor/update-request/', VendorProfileUpdateRequestView.as_view(), name='vendor_update_request'),
     path('admin/approve-update/<int:request_id>/', approve_vendor_update_request, name='admin_approve_update'),
     path('admin/reject-update/<int:request_id>/', reject_vendor_update_request, name='admin_reject_update'),
+    path('admin/vendor-update-requests/', AdminPendingVendorUpdateRequestsView.as_view(), name='admin-vendor-update-requests'),
+    
+
 
     # Nearby & Favorites
     path('toggle-favorite/', ToggleFavoriteVendor.as_view(), name='toggle-favorite'),
