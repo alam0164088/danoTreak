@@ -29,6 +29,8 @@ jobs:
         echo "EMAIL_PORT=1025" >> $GITHUB_ENV
         echo "EMAIL_HOST_USER=test" >> $GITHUB_ENV
         echo "EMAIL_HOST_PASSWORD=test" >> $GITHUB_ENV
+        echo "EMAIL_USE_TLS=False" >> $GITHUB_ENV
+        echo "EMAIL_USE_SSL=False" >> $GITHUB_ENV
 
     - name: Install Dependencies
       run: |
