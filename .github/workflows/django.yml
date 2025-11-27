@@ -23,6 +23,13 @@ jobs:
       with:
         python-version: ${{ matrix.python-version }}
 
+    - name: Set environment variables
+      run: |
+        echo "EMAIL_HOST=localhost" >> $GITHUB_ENV
+        echo "EMAIL_PORT=1025" >> $GITHUB_ENV
+        echo "EMAIL_HOST_USER=test" >> $GITHUB_ENV
+        echo "EMAIL_HOST_PASSWORD=test" >> $GITHUB_ENV
+
     - name: Install Dependencies
       run: |
         python -m pip install --upgrade pip
