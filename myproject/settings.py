@@ -47,6 +47,10 @@ INSTALLED_APPS = [
 
     # Local apps
     "authentication",
+    'vendor',
+    'django.contrib.gis',
+
+    
 ]
 
 # ===================== MIDDLEWARE =====================
