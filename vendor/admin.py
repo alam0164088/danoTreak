@@ -14,11 +14,11 @@ class VisitorAdmin(admin.ModelAdmin):
     list_filter = ('vendor', 'is_blocked',)
     search_fields = ('name', 'phone', 'vendor__shop_name')
 
-@admin.register(Visit)
-class VisitAdmin(admin.ModelAdmin):
-    list_display = ('visitor', 'vendor', 'lat', 'lng', 'timestamp')
-    list_filter = ('vendor', 'timestamp',)
-    search_fields = ('visitor__name', 'visitor__phone', 'vendor__shop_name')
+# @admin.register(Visit)
+# class VisitAdmin(admin.ModelAdmin):
+#     list_display = ('visitor', 'vendor', 'lat', 'lng', 'timestamp')
+#     list_filter = ('vendor', 'timestamp',)
+#     search_fields = ('visitor__name', 'visitor__phone', 'vendor__shop_name')
 
 @admin.register(Redemption)
 class RedemptionAdmin(admin.ModelAdmin):
