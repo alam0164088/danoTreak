@@ -137,34 +137,51 @@ def confirm_redemption(request, redemption_id):
 # vendor/views.py এর শেষে যোগ করো (পুরানো checkin ফাংশনটা মুছে ফেলো)
 
 # vendor/views.py → auto_checkin ফাংশনটা এভাবে রাখো (পুরোটা কপি-পেস্ট করো)
+# vendor/views.py (শুধু auto_checkin ফাংশনটা পুরোটা রিপ্লেস করো)
+
+from django.contrib.gis.geos import Point
+
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def auto_checkin(request):
     user = request.user
 
+    # ১. lat, lng, vendor_id নেওয়া
     try:
         lat = float(request.data['lat'])
         lng = float(request.data['lng'])
         vendor_id = int(request.data['vendor_id'])
     except (KeyError, ValueError, TypeError):
-        return Response({"error": "lat, lng and vendor_id are required"}, status=400)
+        return Response({
+            "error": "lat, lng and vendor_id are required and must be numbers"
+        }, status=400)
 
+    # ২. ভেন্ডর খুঁজে পাওয়া
     from authentication.models import Vendor as VendorProfile
     try:
         vendor = VendorProfile.objects.get(id=vendor_id)
     except VendorProfile.DoesNotExist:
         return Response({"error": "Shop not found"}, status=404)
 
+    # ৩. লোকেশন আছে কিনা চেক
     if vendor.latitude is None or vendor.longitude is None:
         return Response({"error": "Shop location not set by owner"}, status=400)
 
-    # সঠিক দূরত্ব হিসাব (Haversine)
+    # Decimal → float সেফলি
+    try:
+        shop_lat = float(vendor.latitude)
+        shop_lng = float(vendor.longitude)
+    except (TypeError, ValueError):
+        return Response({"error": "Invalid shop coordinates"}, status=500)
+
+    # ৪. দূরত্ব হিসাব (Haversine)
     from math import radians, sin, cos, sqrt, atan2
     R = 6371000
-    lat1, lon1, lat2, lon2 = map(radians, [lat, lng, float(vendor.latitude), float(vendor.longitude)])
-    dlat = lat2 - lat1
-    dlon = lon2 - lon1
-    a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlon/2)**2
+    φ1, λ1 = radians(lat), radians(lng)
+    φ2, λ2 = radians(shop_lat), radians(shop_lng)
+    Δφ = φ2 - φ1
+    Δλ = λ2 - λ1
+    a = sin(Δφ/2)**2 + cos(φ1) * cos(φ2) * sin(Δλ/2)**2
     c = 2 * atan2(sqrt(a), sqrt(1-a))
     distance_m = R * c
 
@@ -172,18 +189,28 @@ def auto_checkin(request):
         return Response({
             "error": "You are too far from the shop",
             "distance_meters": round(distance_m, 1),
-            "max_allowed": 100
+            "max_allowed_meters": 100
         }, status=400)
 
-    # ফোন নম্বর নেওয়া
+    # ৫. ফোন নম্বর ক্লিন করা (সবচেয়ে গুরুত্বপূর্ণ ফিক্স)
     try:
-        phone = user.profile.phone
-        if not phone:
+        raw_phone = user.profile.phone or ""
+        if not raw_phone.strip():
             return Response({"error": "Please set phone number in your profile"}, status=400)
+
+        # +880, space, -, () সব রিমুভ করো
+        phone_digits = "".join(filter(str.isdigit, raw_phone.replace("+880", "0")))
+        
+        # শেষের ১১ ডিজিট নিয়ে 0 দিয়ে শুরু করো
+        if len(phone_digits) >= 11:
+            phone = "0" + phone_digits[-10:]  # 017xxxxxxxxx
+        else:
+            return Response({"error": "Invalid phone number"}, status=400)
+
     except AttributeError:
         return Response({"error": "Profile not found. Please complete your profile."}, status=400)
 
-    # Visitor খুঁজে পাওয়া
+    # ৬. Visitor তৈরি/খুঁজে পাওয়া
     visitor, created = Visitor.objects.get_or_create(
         vendor=vendor,
         phone=phone,
@@ -193,26 +220,27 @@ def auto_checkin(request):
     if visitor.is_blocked:
         return Response({"error": "You are blocked from this shop"}, status=403)
 
-    # ৫ মিনিটে একবার চেক-ইন
+    # ৭. ৫ মিনিটে একবার চেক-ইন
     five_min_ago = timezone.now() - timedelta(minutes=5)
-    recent_visit = Visit.objects.filter(visitor=visitor, timestamp__gte=five_min_ago).exists()
-    if recent_visit:
+    if Visit.objects.filter(visitor=visitor, timestamp__gte=five_min_ago).exists():
         return Response({
             "message": "Already checked in recently. Please wait 5 minutes.",
             "total_visits": visitor.total_visits
         }, status=200)
 
-    # চেক-ইন সফল → lat/lng দিয়ে সেভ করা
+    # ৮. চেক-ইন সেভ করা (PointField দিয়ে)
     Visit.objects.create(
-        visitor=visitor,
-        vendor=vendor,
-        lat=lat,
-        lng=lng
+    visitor=visitor,
+    vendor=vendor,
+    lat=lat,
+    lng=lng,
+
     )
+
     visitor.total_visits += 1
     visitor.save()
 
-    # রিওয়ার্ড চেক
+    # ৯. রিওয়ার্ড চেক
     campaign = Campaign.objects.filter(
         vendor=vendor,
         is_active=True,
@@ -222,15 +250,16 @@ def auto_checkin(request):
     reward_eligible = False
     reward_name = None
     if campaign:
-        redemption, created = Redemption.objects.get_or_create(
+        redemption, created_red = Redemption.objects.get_or_create(
             visitor=visitor,
             campaign=campaign,
             defaults={'status': 'pending'}
         )
-        if created:
+        if created_red:
             reward_eligible = True
             reward_name = campaign.reward_name
 
+    # ১০. সাকসেস রেসপন্স
     return Response({
         "success": True,
         "message": "Check-in successful!",
@@ -240,4 +269,4 @@ def auto_checkin(request):
         "reward_eligible": reward_eligible,
         "reward_name": reward_name,
         "distance_meters": round(distance_m, 1)
-    })
+    }, status=200)

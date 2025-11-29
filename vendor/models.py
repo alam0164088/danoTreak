@@ -17,10 +17,10 @@ class Campaign(models.Model):
     def __str__(self):
         return f"{self.name} - {self.vendor.shop_name}"
 
-
 class Visitor(models.Model):
     vendor = models.ForeignKey(VendorProfile, on_delete=models.CASCADE, related_name='visitors')
-    phone = models.CharField(max_length=15)
+    # max_length ১৫ → ২০ করা হলো (যাতে +880 বা স্পেস থাকলেও সমস্যা না হয়)
+    phone = models.CharField(max_length=20, db_index=True)
     name = models.CharField(max_length=100, blank=True, null=True)
     total_visits = models.PositiveIntegerField(default=0)
     is_blocked = models.BooleanField(default=False)
@@ -32,20 +32,27 @@ class Visitor(models.Model):
     def __str__(self):
         return f"{self.name or self.phone} ({self.total_visits} visits)"
 
+# vendor/models.py → Visit মডেল (GeoDjango বাদ দাও)
 
-# vendor/models.py
 class Visit(models.Model):
     visitor = models.ForeignKey(Visitor, on_delete=models.CASCADE, related_name='visits')
     vendor = models.ForeignKey(VendorProfile, on_delete=models.CASCADE)
-    lat = models.FloatField()   # latitude
-    lng = models.FloatField()   # longitude
+    
+    # GeoDjango বাদ → সিম্পল ফিল্ড
+    lat = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    lng = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    
     timestamp = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         ordering = ['-timestamp']
+        indexes = [
+            models.Index(fields=['timestamp']),
+        ]
 
-
-
+    def __str__(self):
+        return f"Visit by {self.visitor} at {self.timestamp}"
+    
 class Redemption(models.Model):
     campaign = models.ForeignKey(Campaign, on_delete=models.CASCADE, related_name='redemptions')
     visitor = models.ForeignKey(Visitor, on_delete=models.CASCADE, related_name='redemptions')
