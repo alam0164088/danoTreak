@@ -55,7 +55,7 @@ class User(AbstractUser):
 
     email = models.EmailField(_('email address'), unique=True)
     role = models.CharField(max_length=10, choices=ROLE_CHOICES, default='user')
-
+    first_login_done = models.BooleanField(default=False)
     is_email_verified = models.BooleanField(default=False)
     email_verification_code = models.CharField(max_length=6, blank=True, null=True)
     email_verification_code_expires_at = models.DateTimeField(blank=True, null=True)

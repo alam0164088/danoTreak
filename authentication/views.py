@@ -345,63 +345,105 @@ class VerifyOTPView(APIView):
             return Response({"ok": False, "error": "Invalid purpose."}, status=status.HTTP_400_BAD_REQUEST)
         return Response({"ok": False, "error": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
+
+from datetime import timedelta
+from django.utils import timezone
+from django.core.mail import send_mail
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
+from rest_framework.permissions import AllowAny
+from rest_framework_simplejwt.tokens import RefreshToken
+from authentication.models import User, Token
+from authentication.serializers import LoginSerializer
+from django.conf import settings
+import logging
+
+logger = logging.getLogger(__name__)
+
 class LoginView(APIView):
     """Handle user login with password and optional 2FA."""
     permission_classes = [AllowAny]
+
     def post(self, request):
         serializer = LoginSerializer(data=request.data)
         if serializer.is_valid():
             email = serializer.validated_data['email']
             password = serializer.validated_data['password']
+
             user = User.objects.filter(email=email).first()
-            if user and user.check_password(password):
-                if not user.is_email_verified:
-                    return Response({"detail": "Email not verified."}, status=status.HTTP_403_FORBIDDEN)
-                if user.is_2fa_enabled:
-                    code = user.generate_email_verification_code()
-                    send_mail(
-                        '2FA Verification',
-                        f'Your 2FA OTP is {code}. Expires in 5 minutes.',
-                        settings.DEFAULT_FROM_EMAIL,
-                        [user.email],
-                        fail_silently=False,
-                    )
-                    return Response({
-                        "detail": "2FA required. OTP sent to email.",
-                        "next_step": "verify_2fa_otp"
-                    }, status=status.HTTP_206_PARTIAL_CONTENT)
-                refresh = RefreshToken.for_user(user)
-                lifetime = timedelta(days=30) if serializer.validated_data['remember_me'] else timedelta(days=7)
-                refresh.set_exp(lifetime=lifetime)
-                refresh_token_str = str(refresh)
-                access_token_str = str(refresh.access_token)
-                access_expires_in = 900
-                refresh_expires_in = int(refresh.lifetime.total_seconds())
-                Token.objects.create(
-                    user=user,
-                    email=user.email,
-                    refresh_token=refresh_token_str,
-                    access_token=access_token_str,
-                    refresh_token_expires_at=timezone.now() + timedelta(seconds=refresh_expires_in),
-                    access_token_expires_at=timezone.now() + timedelta(minutes=15)
+
+            if not user:
+                return Response({"detail": "Invalid credentials."}, status=status.HTTP_401_UNAUTHORIZED)
+
+            if not user.check_password(password):
+                return Response({"detail": "Invalid credentials."}, status=status.HTTP_401_UNAUTHORIZED)
+
+            if not user.is_email_verified:
+                return Response({"detail": "Email not verified."}, status=status.HTTP_403_FORBIDDEN)
+
+            # প্রথম লগইনের পপ-আপ
+            first_login_popup = False
+            if not user.first_login_done:
+                first_login_popup = True
+                user.first_login_done = True
+                user.save(update_fields=['first_login_done'])
+
+            # 2FA চেক
+            if user.is_2fa_enabled:
+                code = user.generate_email_verification_code()
+                send_mail(
+                    '2FA Verification',
+                    f'Your 2FA OTP is {code}. Expires in 5 minutes.',
+                    settings.DEFAULT_FROM_EMAIL,
+                    [user.email],
+                    fail_silently=False,
                 )
-                logger.info(f"User logged in: {user.email}")
                 return Response({
-                    "access_token": access_token_str,
-                    "access_token_expires_in": access_expires_in,
-                    "refresh_token": refresh_token_str,
-                    "refresh_token_expires_in": refresh_expires_in,
-                    "token_type": "Bearer",
-                    "user": {
-                        "id": user.id,
-                        "email": user.email,
-                        "full_name": user.full_name,
-                        "email_verified": user.is_email_verified,
-                        "role": user.role
-                    }
-                }, status=status.HTTP_200_OK)
-            return Response({"detail": "Invalid credentials."}, status=status.HTTP_401_UNAUTHORIZED)
+                    "detail": "2FA required. OTP sent to email.",
+                    "next_step": "verify_2fa_otp",
+                    "first_login_popup": first_login_popup
+                }, status=status.HTTP_206_PARTIAL_CONTENT)
+
+            # Normal login - JWT token creation
+            refresh = RefreshToken.for_user(user)
+            lifetime = timedelta(days=30) if serializer.validated_data.get('remember_me', False) else timedelta(days=7)
+            refresh.set_exp(lifetime=lifetime)
+
+            refresh_token_str = str(refresh)
+            access_token_str = str(refresh.access_token)
+            access_expires_in = 900  # 15 মিনিট
+            refresh_expires_in = int(refresh.lifetime.total_seconds())
+
+            Token.objects.create(
+                user=user,
+                email=user.email,
+                refresh_token=refresh_token_str,
+                access_token=access_token_str,
+                refresh_token_expires_at=timezone.now() + timedelta(seconds=refresh_expires_in),
+                access_token_expires_at=timezone.now() + timedelta(seconds=access_expires_in)
+            )
+
+            logger.info(f"User logged in: {user.email}")
+
+            return Response({
+                "access_token": access_token_str,
+                "access_token_expires_in": access_expires_in,
+                "refresh_token": refresh_token_str,
+                "refresh_token_expires_in": refresh_expires_in,
+                "token_type": "Bearer",
+                "first_login_popup": first_login_popup,
+                "user": {
+                    "id": user.id,
+                    "email": user.email,
+                    "full_name": user.full_name,
+                    "role": user.role,
+                    "email_verified": user.is_email_verified
+                }
+            }, status=status.HTTP_200_OK)
+
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
 
 class RefreshTokenView(APIView):
     """Refresh access token using a valid refresh token."""
