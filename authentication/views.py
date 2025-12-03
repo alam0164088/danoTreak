@@ -611,28 +611,28 @@ class Verify2FAView(APIView):
 
 # authentication/views.py
 
-import logging
 from django.db import transaction
-from django.utils.decorators import method_decorator
 from django.views.decorators.cache import never_cache
-
+from django.utils.decorators import method_decorator
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
-
-from .models import User, Profile
+from .models import Profile
 from .serializers import UserProfileSerializer, ProfileUpdateSerializer
+import logging
+from rest_framework.parsers import MultiPartParser, FormParser
 
 logger = logging.getLogger(__name__)
 
 
-@method_decorator(never_cache, name='dispatch')   # পুরো ক্লাসের জন্য ক্যাশ বন্ধ
+@method_decorator(never_cache, name='dispatch')
 class MeView(APIView):
     permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser]
 
     def get(self, request):
-        # সবচেয়ে নিরাপদ উপায়: সবসময় ডাটাবেস থেকে ফ্রেশ ডাটা নাও
+        # সবসময় ফ্রেশ ডাটা নিচ্ছি
         user = User.objects.select_related('profile').get(pk=request.user.pk)
         serializer = UserProfileSerializer(user, context={'request': request})
         return Response(serializer.data, status=status.HTTP_200_OK)
@@ -640,43 +640,67 @@ class MeView(APIView):
     def put(self, request):
         profile, _ = Profile.objects.get_or_create(user=request.user)
 
+        # এই লাইনটা পুরোপুরি বদলে দাও — files= আর লাগবে না!
         serializer = ProfileUpdateSerializer(
-            profile,
-            data=request.data,
+            instance=profile,
+            data=request.data,           # শুধু request.data দিলেই হবে
             context={'request': request},
             partial=True
         )
 
         if not serializer.is_valid():
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            return Response({
+                "success": False,
+                "errors": serializer.errors
+            }, status=status.HTTP_400_BAD_REQUEST)
 
         with transaction.atomic():
+            old_image = profile.image
             serializer.save()
 
-        # আপডেটের পর আবার ফ্রেশ ডাটা লোড করা হচ্ছে – কোনো ক্যাশ থাকবে না
+            # পুরানো ইমেজ ডিলিট (যদি নতুন আসে)
+            if old_image and old_image != profile.image:
+                if hasattr(old_image, 'path') and old_image.path != profile.image.path:
+                    from django.core.files.storage import default_storage
+                    if default_storage.exists(old_image.path):
+                        default_storage.delete(old_image.path)
+
         fresh_user = User.objects.select_related('profile').get(pk=request.user.pk)
+        fresh_serializer = UserProfileSerializer(fresh_user, context={'request': request})
 
         return Response({
-            "message": "Profile updated successfully.",
-            "user": UserProfileSerializer(fresh_user, context={'request': request}).data
+            "success": True,
+            "message": "Profile updated successfully!",
+            "user": fresh_serializer.data
         }, status=status.HTTP_200_OK)
 
     def patch(self, request):
-        return self.put(request)   # PATCH = partial PUT
+        # PATCH ও PUT একই কাজ করে
+        return self.put(request)
 
     def delete(self, request):
         password = request.data.get('current_password')
+
         if not password:
-            return Response({"detail": "Current password is required."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({
+                "success": False,
+                "detail": "Current password is required."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
         if not request.user.check_password(password):
-            return Response({"detail": "Current password incorrect."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({
+                "success": False,
+                "detail": "Current password is incorrect."
+            }, status=status.HTTP_400_BAD_REQUEST)
 
         email = request.user.email
         request.user.delete()
-        logger.info(f"Account deleted: {email}")
-        return Response({"message": "Account deleted successfully."}, status=status.HTTP_200_OK)
-    
+        logger.info(f"Account deleted successfully: {email}")
 
+        return Response({
+            "success": True,
+            "message": "Account deleted successfully."
+        }, status=status.HTTP_200_OK)
 
 
 class ResendOTPView(APIView):

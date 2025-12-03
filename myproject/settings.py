@@ -23,6 +23,7 @@ if env_file.exists():
 SECRET_KEY = env("SECRET_KEY")
 DEBUG = env("DEBUG")
 ALLOWED_HOSTS = env.list("ALLOWED_HOSTS")
+APPEND_SLASH = False
 
 # ===================== APPLICATIONS =====================
 INSTALLED_APPS = [
