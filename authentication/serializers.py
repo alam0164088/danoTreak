@@ -110,11 +110,14 @@ class ResendOTPSerializer(serializers.Serializer):
     purpose = serializers.ChoiceField(choices=['email_verification'])
 
 
-    
 class UserProfileSerializer(serializers.ModelSerializer):
     email_verified = serializers.BooleanField(source='is_email_verified', read_only=True)
     profile_image = serializers.SerializerMethodField()
     phone = serializers.CharField(source='profile.phone', read_only=True)
+    full_name = serializers.SerializerMethodField()
+    
+    # এখানে source='gender' মুছে দিয়েছি — কারণ ফিল্ড নামই gender!
+    gender = serializers.CharField(read_only=True)
 
     class Meta:
         model = User
@@ -122,53 +125,73 @@ class UserProfileSerializer(serializers.ModelSerializer):
             'id',
             'email',
             'full_name',
-            'gender',
+            'gender',           # এখানে কোনো source লাগবে না
             'phone',
             'email_verified',
             'created_at',
             'role',
             'profile_image'
         ]
-        read_only_fields = ['id', 'email', 'created_at', 'role']
+        read_only_fields = ['id', 'email', 'created_at', 'role', 'email_verified']
+
+    def get_full_name(self, obj):
+        return obj.get_full_name().strip() or obj.email.split('@')[0]
 
     def get_profile_image(self, obj):
         request = self.context.get('request')
-        profile = getattr(obj, 'profile', None)
-
-        if profile and profile.image:
-            return request.build_absolute_uri(profile.image.url)
-
+        if not request:
+            return "/media/profile_images/default_profile.png"
+        try:
+            if hasattr(obj, 'profile') and obj.profile and obj.profile.image:
+                return request.build_absolute_uri(obj.profile.image.url)
+        except:
+            pass
         return request.build_absolute_uri('/media/profile_images/default_profile.png')
 
 
 
-
 class ProfileUpdateSerializer(serializers.ModelSerializer):
-    full_name = serializers.CharField(source='user.full_name', required=False)
-    gender = serializers.CharField(source='user.gender', required=False)
-    image = serializers.ImageField(required=False)
+    full_name = serializers.CharField(required=False, write_only=True)
+    gender = serializers.CharField(required=False, write_only=True)
+    image = serializers.ImageField(required=False, allow_null=True)
 
     class Meta:
         model = Profile
-        fields = ['full_name', 'phone', 'gender', 'image']
+        fields = ['full_name', 'gender', 'phone', 'image']
 
     def update(self, instance, validated_data):
-        # nested user fields
-        user_data = validated_data.pop('user', {})
+        user = instance.user
+        data = self.context['request'].data
 
-        instance.user.full_name = user_data.get('full_name', instance.user.full_name)
-        instance.user.gender = user_data.get('gender', instance.user.gender)
-        instance.user.save()
+        full_name = data.get('full_name')
+        gender = data.get('gender')
 
-        # profile fields
-        instance.phone = validated_data.get('phone', instance.phone)
+        # নাম আপডেট — এই লাইনটা ঠিক করা হয়েছে!
+        if full_name and full_name.strip():
+            names = full_name.strip().split()
+            user.first_name = names[0]
+            user.last_name = ' '.join(names[1:]) if len(names) > 1 else ''
+            user.save(update_fields=['first_name', 'last_name'])  # এটা ঠিক আছে
+
+        # জেন্ডার
+        if gender and gender.strip():
+            user.gender = gender.strip().lower()
+            user.save(update_fields=['gender'])
+
+        # ফোন
+        if 'phone' in validated_data:
+            instance.phone = validated_data['phone']
+
+        # ইমেজ
         if 'image' in validated_data:
-            instance.image = validated_data.get('image')
+            new_image = validated_data['image']
+            if new_image is None:
+                instance.image = None
+            elif new_image:
+                instance.image = new_image
+
         instance.save()
-
         return instance
-
-
 
 # class SubscriptionPlanSerializer(serializers.ModelSerializer):
 #     class Meta:
