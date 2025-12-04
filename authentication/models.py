@@ -62,7 +62,7 @@ class User(AbstractUser):
 
     password_reset_code = models.CharField(max_length=6, blank=True, null=True)
     password_reset_code_expires_at = models.DateTimeField(blank=True, null=True)
-
+    phone = models.CharField(max_length=20, blank=True, null=True)
     full_name = models.CharField(max_length=255, blank=True)
     gender = models.CharField(
         max_length=10,

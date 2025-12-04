@@ -4,42 +4,62 @@ import re
 from django.utils import timezone
 from datetime import timedelta
 
+
+
+
+
 class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, min_length=8)
     password_confirm = serializers.CharField(write_only=True, min_length=8)
-    send_verification_otp = serializers.BooleanField(default=True)
+    send_verification_otp = serializers.BooleanField(default=True, write_only=True)
     role = serializers.ChoiceField(choices=User.ROLE_CHOICES, default='user', required=False)
+    phone = serializers.CharField(required=False, allow_blank=True)  # নতুন ফিল্ড
 
     class Meta:
         model = User
-        fields = ['email', 'password', 'password_confirm', 'full_name', 'send_verification_otp', 'role', 'referral_code']
-
+        fields = ['email', 'password', 'password_confirm', 'full_name', 'phone', 
+                  'send_verification_otp', 'role', 'referral_code']
 
     def validate(self, data):
+        # Password match
         if data['password'] != data['password_confirm']:
             raise serializers.ValidationError({"password": "Passwords do not match."})
+
+        # Password complexity
         if not re.match(r'^(?=.*[A-Za-z])(?=.*\d)(?=.*[@$!%*#?&])[A-Za-z\d@$!%*#?&]{8,}$', data['password']):
             raise serializers.ValidationError({
                 "password": "Password must be at least 8 characters long and contain letters, numbers, and special characters."
             })
-        if data.get('role') in ['admin', 'vendor'] and not self.context['request'].user.is_authenticated:
-            raise serializers.ValidationError({"role": "Only authenticated admins can assign 'admin' or 'vendor' roles."})
-        if data.get('role') in ['admin', 'vendor'] and self.context['request'].user.role != 'admin':
-            raise serializers.ValidationError({"role": "Only admins can assign 'admin' or 'vendor' roles."})
+
+        # Role validation
+        role = data.get('role')
+        request_user = self.context['request'].user if 'request' in self.context else None
+        if role in ['admin', 'vendor']:
+            if not request_user or not request_user.is_authenticated:
+                raise serializers.ValidationError({"role": "Only authenticated admins can assign 'admin' or 'vendor' roles."})
+            if request_user.role != 'admin':
+                raise serializers.ValidationError({"role": "Only admins can assign 'admin' or 'vendor' roles."})
+
         return data
 
     def create(self, validated_data):
-        validated_data.pop('password_confirm')
-        validated_data.pop('send_verification_otp')
         password = validated_data.pop('password')
+        validated_data.pop('password_confirm', None)
+        send_otp = validated_data.pop('send_verification_otp', True)
 
         user = User.objects.create_user(
             email=validated_data['email'],
             password=password,
             full_name=validated_data.get('full_name', ''),
+            phone=validated_data.get('phone', ''),
             role=validated_data.get('role', 'user'),
             referral_code=validated_data.get('referral_code', None)
         )
+
+        # OTP generate
+        if send_otp:
+            user.generate_email_verification_code()
+
         return user
 
 
