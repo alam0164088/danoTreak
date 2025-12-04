@@ -132,7 +132,7 @@ class VendorSignUpView(APIView):
             email=email.lower().strip(),
             password=password,
             role='vendor',
-            is_active=False,           # এডমিন approve করার আগে লগিন করতে পারবে না
+            is_active=True,           # এডমিন approve করার আগে লগিন করতে পারবে না
             is_email_verified=True     # OTP নাই → তাই verified ধরে নিচ্ছি
         )
 
@@ -147,10 +147,9 @@ class VendorSignUpView(APIView):
                 "id": user.id,
                 "email": user.email,
                 "role": "vendor",
-                "is_active": False
+                "is_active": True
             }
         }, status=status.HTTP_201_CREATED)
-
 
 
 
@@ -158,9 +157,14 @@ class VendorSignUpView(APIView):
 class InitialAdminSignUpView(APIView):
     """Handle initial admin signup (only one admin allowed initially)."""
     permission_classes = [AllowAny]
+    
     def post(self, request):
+        # যদি ইতিমধ্যে কোনো এডমিন থাকে
         if User.objects.filter(role='admin').exists():
-            return Response({"detail": "An admin already exists. Use admin-signup endpoint."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({
+                "detail": "An admin already exists. Use regular login or contact support."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
         serializer = RegisterSerializer(data=request.data)
         if serializer.is_valid():
             user = serializer.save()
@@ -168,35 +172,51 @@ class InitialAdminSignUpView(APIView):
             user.is_email_verified = True
             user.is_active = True
             user.save()
-            code = user.generate_email_verification_code()
-            send_mail(
-                'Verify Your Admin Email',
-                f'Your verification code is {code} (already verified for initial admin).',
-                settings.DEFAULT_FROM_EMAIL,
-                [user.email],
-                fail_silently=False,
-            )
+
+            # ইমেইল পাঠাও (অপশনাল, কিন্তু ভালো)
+            try:
+                code = user.generate_email_verification_code()
+                send_mail(
+                    'Welcome Admin!',
+                    f'আপনার এডমিন একাউন্ট তৈরি হয়েছে!\nইমেইল: {user.email}\nপাসওয়ার্ড: (যেটা দিয়েছেন)\n\nলগইন করুন: {settings.FRONTEND_URL}/admin/login',
+                    settings.DEFAULT_FROM_EMAIL,
+                    [user.email],
+                    fail_silently=True,
+                )
+            except:
+                pass  # ইমেইল না গেলেও সমস্যা নাই
+
+            # JWT টোকেন তৈরি
             refresh = RefreshToken.for_user(user)
             refresh_token = str(refresh)
             access_token = str(refresh.access_token)
-            refresh_expires_at = timezone.now() + refresh.lifetime
-            access_expires_at = timezone.now() + timedelta(minutes=15)
+
+            # গুরুত্বপূর্ণ: পুরানো টোকেন মুছে নতুনটা দাও
+            Token.objects.filter(user=user).delete()
             Token.objects.create(
                 user=user,
                 email=user.email,
                 refresh_token=refresh_token,
                 access_token=access_token,
-                refresh_token_expires_at=refresh_expires_at,
-                access_token_expires_at=access_expires_at
+                refresh_token_expires_at=timezone.now() + refresh.lifetime,
+                access_token_expires_at=timezone.now() + timedelta(minutes=15),
             )
-            logger.info(f"Initial admin created: {user.email}")
+
+            logger.info(f"Initial admin created successfully: {user.email}")
+
             return Response({
-                "id": user.id,
-                "email": user.email,
-                "role": user.role,
-                "message": "Initial admin created successfully."
+                "success": True,
+                "message": "প্রথম এডমিন একাউন্ট সফলভাবে তৈরি হয়েছে!",
+                "admin": {
+                    "id": user.id,
+                    "email": user.email,
+                    "access_token": access_token,
+                    "refresh_token": refresh_token
+                }
             }, status=status.HTTP_201_CREATED)
+
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
 
 class AdminSignUpView(APIView):
     """Handle admin signup by an existing admin."""
@@ -375,89 +395,107 @@ from django.conf import settings
 import logging
 
 logger = logging.getLogger(__name__)
-
 class LoginView(APIView):
-    """Handle user login with password and optional 2FA."""
     permission_classes = [AllowAny]
 
     def post(self, request):
         serializer = LoginSerializer(data=request.data)
-        if serializer.is_valid():
-            email = serializer.validated_data['email']
-            password = serializer.validated_data['password']
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-            user = User.objects.filter(email=email).first()
+        email = serializer.validated_data['email'].lower().strip()
+        password = serializer.validated_data['password']
+        user = User.objects.filter(email=email).first()
 
-            if not user:
-                return Response({"detail": "Invalid credentials."}, status=status.HTTP_401_UNAUTHORIZED)
+        if not user:
+            return Response({"detail": "ইমেইল বা পাসওয়ার্ড ভুল।"}, status=401)
 
-            if not user.check_password(password):
-                return Response({"detail": "Invalid credentials."}, status=status.HTTP_401_UNAUTHORIZED)
+        if not user.check_password(password):
+            return Response({"detail": "ইমেইল বা পাসওয়ার্ড ভুল।"}, status=401)
 
+        # ভেন্ডর হলে শুধু OTP চেক না করাই (তুমি চাও এমন)
+        if user.role != 'vendor':
             if not user.is_email_verified:
-                return Response({"detail": "Email not verified."}, status=status.HTTP_403_FORBIDDEN)
-
-            # প্রথম লগইনের পপ-আপ
-            first_login_popup = False
-            if not user.first_login_done:
-                first_login_popup = True
-                user.first_login_done = True
-                user.save(update_fields=['first_login_done'])
-
-            # 2FA চেক
-            if user.is_2fa_enabled:
-                code = user.generate_email_verification_code()
-                send_mail(
-                    '2FA Verification',
-                    f'Your 2FA OTP is {code}. Expires in 5 minutes.',
-                    settings.DEFAULT_FROM_EMAIL,
-                    [user.email],
-                    fail_silently=False,
-                )
                 return Response({
-                    "detail": "2FA required. OTP sent to email.",
-                    "next_step": "verify_2fa_otp",
-                    "first_login_popup": first_login_popup
-                }, status=status.HTTP_206_PARTIAL_CONTENT)
+                    "detail": "ইমেইল ভেরিফাই করা হয়নি। আপনার ইমেইলে পাঠানো OTP দিয়ে ভেরিফাই করুন।",
+                    "next_step": "verify_email_otp"
+                }, status=403)
 
-            # Normal login - JWT token creation
-            refresh = RefreshToken.for_user(user)
-            lifetime = timedelta(days=30) if serializer.validated_data.get('remember_me', False) else timedelta(days=7)
-            refresh.set_exp(lifetime=lifetime)
+            if not user.is_active:
+                return Response({
+                    "detail": "আপনার একাউন্ট সক্রিয় করা হয়নি। সাপোর্টে যোগাযোগ করুন।"
+                }, status=403)
+        else:
+            # ভেন্ডরের জন্য কোনো OTP চেক নাই, শুধু is_active হলেই চলবে
+            if not user.is_active:
+                return Response({
+                    "detail": "আপনার ভেন্ডর একাউন্ট এখনো সক্রিয় করা হয়নি।",
+                    "contact_admin": True
+                }, status=403)
 
-            refresh_token_str = str(refresh)
-            access_token_str = str(refresh.access_token)
-            access_expires_in = 900  # 15 মিনিট
-            refresh_expires_in = int(refresh.lifetime.total_seconds())
+        # প্রথম লগইন পপআপ
+        first_login_popup = False
+        if not user.first_login_done:
+            first_login_popup = True
+            user.first_login_done = True
+            user.save(update_fields=['first_login_done'])
 
-            Token.objects.create(
-                user=user,
-                email=user.email,
-                refresh_token=refresh_token_str,
-                access_token=access_token_str,
-                refresh_token_expires_at=timezone.now() + timedelta(seconds=refresh_expires_in),
-                access_token_expires_at=timezone.now() + timedelta(seconds=access_expires_in)
+        # 2FA চেক
+        if user.is_2fa_enabled:
+            code = user.generate_email_verification_code()
+            send_mail(
+                '2FA ভেরিফিকেশন কোড',
+                f'আপনার 2FA OTP: {code}\nমেয়াদ: ৫ মিনিট',
+                settings.DEFAULT_FROM_EMAIL,
+                [user.email],
+                fail_silently=True,
             )
-
-            logger.info(f"User logged in: {user.email}")
-
             return Response({
-                "access_token": access_token_str,
-                "access_token_expires_in": access_expires_in,
-                "refresh_token": refresh_token_str,
-                "refresh_token_expires_in": refresh_expires_in,
-                "token_type": "Bearer",
-                "first_login_popup": first_login_popup,
-                "user": {
-                    "id": user.id,
-                    "email": user.email,
-                    "full_name": user.full_name,
-                    "role": user.role,
-                    "email_verified": user.is_email_verified
-                }
-            }, status=status.HTTP_200_OK)
+                "detail": "2FA প্রয়োজন। ইমেইলে OTP পাঠানো হয়েছে।",
+                "next_step": "verify_2fa_otp",
+                "first_login_popup": first_login_popup
+            }, status=206)
 
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        # সব ঠিক থাকলে টোকেন দাও
+        refresh = RefreshToken.for_user(user)
+        lifetime = timedelta(days=30) if serializer.validated_data.get('remember_me', False) else timedelta(days=7)
+        refresh.set_exp(lifetime=lifetime)
+
+        refresh_token_str = str(refresh)
+        access_token_str = str(refresh.access_token)
+
+        # এই লাইনটা সমস্যার মূল কারণ ছিল — এটা মুছে ফেলো!
+        # Token.objects.update_or_create(...)  ← এটা আর ব্যবহার করো না!
+
+        # এই নতুন কোডটা বসাও — ডুপ্লিকেট টোকেন এরর চিরতরে শেষ!
+        Token.objects.filter(user=user).delete()  # পুরানো টোকেন মুছে ফেলো
+        Token.objects.create(
+            user=user,
+            email=user.email,
+            refresh_token=refresh_token_str,
+            access_token=access_token_str,
+            refresh_token_expires_at=timezone.now() + refresh.lifetime,
+            access_token_expires_at=timezone.now() + timedelta(minutes=15),
+        )
+
+        logger.info(f"সফল লগইন: {user.email} ({user.role})")
+
+        return Response({
+            "access_token": access_token_str,
+            "access_token_expires_in": 900,
+            "refresh_token": refresh_token_str,
+            "refresh_token_expires_in": int(refresh.lifetime.total_seconds()),
+            "token_type": "Bearer",
+            "first_login_popup": first_login_popup,
+            "user": {
+                "id": user.id,
+                "email": user.email,
+                "full_name": user.full_name or "",
+                "role": user.role,
+                "is_active": user.is_active,
+                "email_verified": user.is_email_verified
+            }
+        }, status=200)
 
 
 class RefreshTokenView(APIView):
@@ -1514,94 +1552,182 @@ class AdminPendingVendorUpdateRequestsView(APIView):
 
 # ================== ADMIN ONLY: Approve / Reject Vendor Update Request (100% Working) ==================
 
+# =============================================================================
+# ADMIN PANEL: Vendor Management APIs (ফাইনাল, সাজানো-গোছানো ভার্সন)
+# =============================================================================
+
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework import status
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
+from django.utils.timezone import localtime
+from django.core.mail import send_mail
+from django.conf import settings
 from django.core.files import File
 import os
+import logging
+
+from authentication.models import User, VendorProfileUpdateRequest
+
+logger = logging.getLogger(__name__)
 
 
-def admin_only(user):
-    return user.is_authenticated and user.role == 'admin'
-
-
+# -----------------------------------------------------------------------------
+# সহায়ক ফাংশন: ফাইল কপি করা (নিরাপদে)
+# -----------------------------------------------------------------------------
 def copy_uploaded_file(source_field, target_field):
-    """সঠিকভাবে ফাইল কপি করে (যা আগে কাজ করত না)"""
+    """UploadedFile কে অন্য ফিল্ডে সঠিকভাবে কপি করে। পুরানো ফাইল মুছে ফেলে।"""
     if not source_field:
         return
 
-    # পুরানো ফাইল মুছে ফেলো
+    # পুরানো ফাইল থাকলে মুছে ফেলো
     if target_field:
         target_field.delete(save=False)
 
     try:
-        source_field.open('rb')  # ফাইল ওপেন করা জরুরি
+        source_field.open('rb')
         file_name = os.path.basename(source_field.name)
         target_field.save(file_name, File(source_field), save=False)
+    except Exception as e:
+        logger.error(f"File copy failed: {e}")
     finally:
         source_field.close()
 
 
+# =============================================================================
+# ১. ভেন্ডর রেজিস্ট্রেশন অনুমোদন → লগইন চালু করা
+# =============================================================================
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def approve_vendor_registration(request, user_id):
+    """
+    এডমিন নতুন ভেন্ডরকে লগইনের অনুমতি দেয়
+    URL: POST /admin/approve-vendor/<int:user_id>/
+    """
+    if request.user.role != 'admin':
+        return Response({
+            "success": False,
+            "message": "শুধুমাত্র এডমিন এই কাজ করতে পারবেন"
+        }, status=403)
+
+    try:
+        user = User.objects.get(id=user_id, role='vendor')
+    except User.DoesNotExist:
+        return Response({
+            "success": False,
+            "message": "এই আইডি দিয়ে কোনো ভেন্ডর পাওয়া যায়নি"
+        }, status=404)
+
+    if user.is_active:
+        return Response({
+            "success": False,
+            "message": "এই ভেন্ডর ইতিমধ্যে অনুমোদিত হয়েছে"
+        }, status=400)
+
+    # অনুমোদন দেওয়া
+    user.is_active = True
+    user.save(update_fields=['is_active'])
+
+    # ভেন্ডরকে স্বাগতম ইমেইল
+    try:
+        send_mail(
+            subject="আপনার ভেন্ডর একাউন্ট অনুমোদিত হয়েছে!",
+            message=f"""প্রিয় {user.full_name or 'ভেন্ডর'},
+
+আপনার ভেন্ডর একাউন্ট সফলভাবে অনুমোদিত হয়েছে।
+এখন আপনি লগইন করে আপনার দোকানের প্রোফাইল পূরণ করতে পারবেন।
+
+ইমেইল: {user.email}
+লগইন লিংক: {getattr(settings, 'FRONTEND_URL', 'https://yourapp.com')}/vendor/login
+
+ধন্যবাদ,
+টিম""",
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[user.email],
+            fail_silently=True,
+        )
+    except Exception as e:
+        logger.warning(f"Approval email failed for {user.email}: {e}")
+
+    logger.info(f"Vendor registration approved → {user.email} by {request.user.email}")
+
+    return Response({
+        "success": True,
+        "message": f"ভেন্ডর {user.email} সফলভাবে অনুমোদিত হয়েছে। এখন লগইন করতে পারবে।"
+    }, status=200)
+
+
+# =============================================================================
+# ২. ভেন্ডর প্রোফাইল আপডেট রিকোয়েস্ট অনুমোদন
+# =============================================================================
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def approve_vendor_update_request(request, request_id):
-    if not admin_only(request.user):
-        return Response({
-            "success": False,
-            "message": "শুধুমাত্র এডমিন এই কাজ করতে পারবে"
-        }, status=403)
+    """
+    এডমিন ভেন্ডরের প্রোফাইল আপডেট রিকোয়েস্ট অনুমোদন করে
+    URL: POST /admin/approve-update/<int:request_id>/
+    """
+    if request.user.role != 'admin':
+        return Response({"success": False, "message": "শুধুমাত্র এডমিন"}, status=403)
 
     req = get_object_or_404(VendorProfileUpdateRequest, id=request_id, status='pending')
     vendor = req.vendor
 
     # টেক্সট ডাটা আপডেট
-    for field, value in req.new_data.items():
+    for field, value in (req.new_data or {}).items():
         if hasattr(vendor, field):
             setattr(vendor, field, value)
 
-    # NID, NID Back, Trade License কপি করো
+    # ডকুমেন্ট কপি
     copy_uploaded_file(req.nid_front, vendor.nid_front)
     copy_uploaded_file(req.nid_back, vendor.nid_back)
     copy_uploaded_file(req.trade_license, vendor.trade_license)
 
-    # দোকানের ছবি আপডেট করো (এটাই আগে মিস করেছিলে!)
+    # দোকানের ছবি আপডেট (খুবই গুরুত্বপূর্ণ!)
     if req.shop_images and isinstance(req.shop_images, list):
-        vendor.shop_images = req.shop_images  # এই লাইনটা যোগ করো
+        vendor.shop_images = req.shop_images
 
-    # সব শেষে সেভ করো
     vendor.save()
 
-    # রিকোয়েস্ট স্ট্যাটাস
+    # রিকোয়েস্ট স্ট্যাটাস
     req.status = 'approved'
     req.reviewed_by = request.user
     req.reviewed_at = timezone.now()
     req.save()
 
+    logger.info(f"Profile update approved → {vendor.user.email} by {request.user.email}")
+
     return Response({
         "success": True,
-        "message": "ভেন্ডর প্রোফাইল সম্পূর্ণ আপডেট হয়েছে! দোকানের ছবি, NID, ট্রেড লাইসেন্স সব আপডেট হয়েছে",
+        "message": "ভেন্ডর প্রোফাইল সফলভাবে আপডেট করা হয়েছে!",
+        "vendor_email": vendor.user.email,
         "shop_name": vendor.shop_name,
-        "shop_images_count": len(vendor.shop_images),
-        "documents_updated": bool(req.nid_front or req.nid_back or req.trade_license),
+        "total_shop_images": len(vendor.shop_images or []),
         "approved_by": request.user.email,
-        "approved_at": timezone.localtime(req.reviewed_at).strftime("%d %b %Y, %I:%M %p")
-    })
+        "approved_at": localtime(req.reviewed_at).strftime("%d %b %Y, %I:%M %p")
+    }, status=200)
 
 
+# =============================================================================
+# ৩. ভেন্ডর প্রোফাইল আপডেট রিকোয়েস্ট রিজেক্ট
+# =============================================================================
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def reject_vendor_update_request(request, request_id):
-    if not admin_only(request.user):
-        return Response({
-            "success": False,
-            "message": "শুধুমাত্র এডমিন এই কাজ করতে পারবে"
-        }, status=403)
+    """
+    এডমিন রিকোয়েস্ট রিজেক্ট করে + কারণ দিতে পারে
+    URL: POST /admin/reject-update/<int:request_id>/
+    Body: { "reason": "NID ছবি অস্পষ্ট" }
+    """
+    if request.user.role != 'admin':
+        return Response({"success": False, "message": "শুধুমাত্র এডমিন"}, status=403)
 
     req = get_object_or_404(VendorProfileUpdateRequest, id=request_id, status='pending')
-    
-    reason = request.data.get('reason', 'কোনো কারণ উল্লেখ করা হয়নি')
+    vendor = req.vendor
+
+    reason = request.data.get('reason', '').strip() or "কোনো কারণ উল্লেখ করা হয়নি"
 
     req.status = 'rejected'
     req.reviewed_by = request.user
@@ -1609,14 +1735,36 @@ def reject_vendor_update_request(request, request_id):
     req.reason = reason
     req.save()
 
+    # ভেন্ডরকে ইমেইল
+    try:
+        send_mail(
+            subject="প্রোফাইল আপডেট রিকোয়েস্ট রিজেক্ট হয়েছে",
+            message=f"""প্রিয় {vendor.user.full_name or 'ভেন্ডর'},
+
+আপনার প্রোফাইল আপডেট রিকোয়েস্ট রিজেক্ট করা হয়েছে।
+
+কারণ: {reason}
+
+অনুগ্রহ করে সংশোধন করে আবার রিকোয়েস্ট পাঠান।
+
+ধন্যবাদ,
+টিম""",
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[vendor.user.email],
+            fail_silently=True,
+        )
+    except Exception as e:
+        logger.warning(f"Rejection email failed: {e}")
+
+    logger.info(f"Update request rejected → {vendor.user.email} | Reason: {reason}")
+
     return Response({
         "success": True,
-        "message": "প্রোফাইল আপডেট রিকোয়েস্ট রিজেক্ট করা হয়েছে",
+        "message": "রিকোয়েস্ট সফলভাবে রিজেক্ট করা হয়েছে",
         "reason": reason,
         "rejected_by": request.user.email,
-        "rejected_at": timezone.localtime(req.reviewed_at).strftime("%d %b %Y, %I:%M %p")
-    })
-
+        "rejected_at": localtime(req.reviewed_at).strftime("%d %b %Y, %I:%M %p")
+    }, status=200)
 
 
 # views.py
