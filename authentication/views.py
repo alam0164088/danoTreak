@@ -37,15 +37,19 @@ User = get_user_model()
 # Remove load_dotenv() from here; it should be in settings.py
 # load_dotenv()
 
+
 class RegisterView(APIView):
     """Handle user registration with optional email verification OTP."""
     permission_classes = [AllowAny]
+
     def post(self, request):
-        serializer = RegisterSerializer(data=request.data)
+        serializer = RegisterSerializer(data=request.data, context={'request': request})
         if serializer.is_valid():
             user = serializer.save()
             send_verification = request.data.get('send_verification_otp', True)
+
             if send_verification:
+                # OTP generate & send
                 code = user.generate_email_verification_code()
                 send_mail(
                     'Verify Your Email',
@@ -57,10 +61,16 @@ class RegisterView(APIView):
                 user.is_active = False
                 user.save()
                 logger.info(f"User registered: {user.email} (verification pending)")
+
                 return Response({
                     "id": user.id,
                     "email": user.email,
+                    "full_name": user.full_name,
+                    "phone": user.phone,
+                    "referral_code": user.referral_code,
+                    "role": user.role,
                     "is_active": False,
+                    "is_email_verified": user.is_email_verified,
                     "message": "User created. Verification OTP sent to email. OTP expires in 5 minutes."
                 }, status=status.HTTP_201_CREATED)
             else:
@@ -68,15 +78,20 @@ class RegisterView(APIView):
                 user.is_email_verified = True
                 user.save()
                 logger.info(f"User registered: {user.email} (verification skipped)")
+
                 return Response({
                     "id": user.id,
                     "email": user.email,
+                    "full_name": user.full_name,
+                    "phone": user.phone,
+                    "referral_code": user.referral_code,
+                    "role": user.role,
                     "is_active": True,
+                    "is_email_verified": True,
                     "message": "User created successfully."
                 }, status=status.HTTP_201_CREATED)
+
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-
 
 
 
