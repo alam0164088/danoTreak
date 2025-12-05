@@ -1217,10 +1217,9 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
-
-
 class VendorProfileUpdateRequestView(APIView):
     permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser]  # এটা না থাকলে ইমেজ + FormData কাজ করবে না!
 
     def post(self, request):
         if request.user.role != 'vendor':
@@ -1238,82 +1237,94 @@ class VendorProfileUpdateRequestView(APIView):
             }, status=404)
 
         data = request.data.copy()
+        files = request.FILES
 
-        # সব ফিল্ড যেগুলো আপডেট করা যাবে
         allowed_fields = [
             'shop_name', 'vendor_name', 'phone_number', 'shop_address',
             'category', 'latitude', 'longitude',
             'rating', 'review_count',
-            'description',      # ← যোগ হয়েছে
-            'activities'        # ← যোগ হয়েছে
+            'description', 'activities'
         ]
 
         new_data = {}
 
-        # ================ description & activities স্পেশাল হ্যান্ডলিং ================
+        # === description হ্যান্ডলিং ===
         if 'description' in data:
             desc = data['description']
-            if desc is not None and str(desc).strip():
-                new_data['description'] = str(desc).strip()
-            else:
-                new_data['description'] = ""
+            new_data['description'] = str(desc).strip() if desc and str(desc).strip() else ""
 
+        # === activities হ্যান্ডলিং (মূল সমাধান এখানে!) ===
         if 'activities' in data:
-            acts = data['activities']
-            if isinstance(acts, list):
-                clean_activities = [str(item).strip() for item in acts if str(item).strip()]
-                new_data['activities'] = clean_activities
+            acts_input = data['activities']
+
+            if isinstance(acts_input, str) and acts_input.strip():
+                try:
+                    # প্রথমে JSON পার্স করার চেষ্টা করো
+                    parsed = json.loads(acts_input)
+                    if isinstance(parsed, list):
+                        new_data['activities'] = [str(item).strip() for item in parsed if str(item).strip()]
+                    else:
+                        new_data['activities'] = []
+                except:
+                    # JSON না হলে কমা দিয়ে স্প্লিট করো
+                    items = [item.strip() for item in acts_input.split(',') if item.strip()]
+                    new_data['activities'] = items
+            elif isinstance(acts_input, list):
+                new_data['activities'] = [str(item).strip() for item in acts_input if str(item).strip()]
             else:
                 new_data['activities'] = []
-        # =============================================================================
 
-        # বাকি ফিল্ডগুলো (description, activities বাদ দিয়ে)
+        # === বাকি ফিল্ডগুলো ===
         for key in allowed_fields:
             if key in ['description', 'activities']:
-                continue  # আগেই হ্যান্ডেল করা হয়েছে
+                continue
 
             value = data.get(key)
-            if value in [None, '', 'null', 'undefined']:
+            if value in [None, '', 'null', 'undefined', 'None']:
                 continue
 
             if key == 'rating':
                 try:
                     value = round(float(value), 2)
                     if not 0 <= value <= 5:
-                        return Response({"success": False, "message": "রেটিং ০ থেকে ৫ এর মধ্যে হতে হবে"}, status=400)
-                except (ValueError, TypeError):
-                    return Response({"success": False, "message": "রেটিং সঠিক ফরম্যাটে দিন (যেমন: 4.85)"}, status=400)
+                        return Response({"success": False, "message": "রেটিং ০-৫ এর মধ্যে হতে হবে"}, status=400)
+                except:
+                    return Response({"success": False, "message": "রেটিং সঠিক ফরম্যাটে দিন"}, status=400)
 
             elif key == 'review_count':
                 try:
-                    value = int(value)
-                    if value < 0:
-                        value = 0
-                except (ValueError, TypeError):
+                    value = max(0, int(value))
+                except:
                     return Response({"success": False, "message": "রিভিউ সংখ্যা সঠিক হতে হবে"}, status=400)
+
+            elif key in ['latitude', 'longitude']:
+                try:
+                    value = str(value)
+                except:
+                    continue
 
             new_data[key] = value
 
-        # দোকানের ছবি আপলোড (যদি থাকে)
+        # === ইমেজ আপলোড ===
         uploaded_shop_images = []
-        if 'shop_images' in request.FILES:
-            for file in request.FILES.getlist('shop_images'):
+        if 'shop_images' in files:
+            for file in files.getlist('shop_images'):
                 ext = os.path.splitext(file.name)[1].lower()
-                if ext not in ['.jpg', '.jpeg', '.png', '.webp']:
+                if ext not in ['.jpg', '.jpeg', '.png', '.webp', '.gif']:
                     continue
-                filename = f"shop_{uuid.uuid4().hex}{ext}"
+                filename = f"update_{uuid.uuid4().hex}{ext}"
                 path = default_storage.save(f'vendor_update_docs/shop_images/{filename}', ContentFile(file.read()))
                 full_url = request.build_absolute_uri(settings.MEDIA_URL + path)
                 uploaded_shop_images.append(full_url)
 
-        # রিকোয়েস্ট সেভ করা
+        # === রিকোয়েস্ট সেভ করা ===
         update_request = VendorProfileUpdateRequest.objects.create(
             vendor=vendor,
             requested_by=request.user,
             new_data=new_data,
-            nid_front=request.FILES.get('nid_front'),
-            nid_back=request.FILES.get('nid_back'),
-            trade_license=request.FILES.get('trade_license'),
+            nid_front=files.get('nid_front'),
+            nid_back=files.get('nid_back'),
+            trade_license=files.get('trade_license'),
             shop_images=uploaded_shop_images
         )
 
@@ -1322,7 +1333,7 @@ class VendorProfileUpdateRequestView(APIView):
             "message": "প্রোফাইল আপডেট রিকোয়েস্ট সফলভাবে পাঠানো হয়েছে। এডমিন শীঘ্রই রিভিউ করবে।",
             "request_id": update_request.id,
             "status": update_request.status,
-            "requested_changes": new_data,   # ← এখানে description + activities ও দেখাবে
+            "requested_changes": new_data,
             "uploaded_shop_images_count": len(uploaded_shop_images),
             "preview_images": uploaded_shop_images[:3]
         }, status=201)
@@ -1349,12 +1360,11 @@ class VendorProfileUpdateRequestView(APIView):
                         "nid_back": request.build_absolute_uri(r.nid_back.url) if r.nid_back else None,
                         "trade_license": request.build_absolute_uri(r.trade_license.url) if r.trade_license else None,
                     },
-                    "shop_images": r.shop_images
+                    "shop_images": r.shop_images or []
                 })
             return Response({"success": True, "requests": data})
-        except Exception:
+        except:
             return Response({"success": False, "message": "প্রোফাইল পাওয়া যায়নি"})
-        
 
 
 
