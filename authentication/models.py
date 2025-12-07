@@ -113,9 +113,9 @@ class User(AbstractUser):
 
     def generate_password_reset_code(self):
         from .utils import generate_otp
-        code = generate_otp(self.email, save_raw=True, expiry_minutes=15)
+        code = generate_otp(self.email, save_raw=True, expiry_minutes=5)
         self.password_reset_code = code
-        self.password_reset_code_expires_at = timezone.now() + timedelta(minutes=15)
+        self.password_reset_code_expires_at = timezone.now() + timedelta(minutes=5)
         self.save(update_fields=['password_reset_code', 'password_reset_code_expires_at'])
         return code
 

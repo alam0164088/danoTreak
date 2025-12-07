@@ -15,3 +15,49 @@ trek/
 │   ├── permissions.py       # কাস্টম পারমিশন (এডমিন/ইউজার রোল চেক)             # gTTS helper functions (optional)
 ├── manage.py                # Django প্রজেক্ট ম্যানেজমেন্ট
 ├── requirements.txt         # প্রয়োজনীয় প্যাকেজ
+├── authentication
+│   ├── admin.py
+│   ├── apps.py
+│   ├── __init__.py
+│   ├── migrations
+│   ├── models.py
+│   ├── permissions.py
+│   ├── __pycache__
+│   ├── serializers.py
+│   ├── signals.py
+│   ├── tests.py
+│   ├── urls.py
+│   ├── utils.py
+│   └── views.py
+├── env
+│   ├── bin
+│   ├── include
+│   ├── lib
+│   ├── lib64 -> lib
+│   └── pyvenv.cfg
+├── FETCH_HEAD
+├── manage.py
+├── media
+│   ├── profile_images
+│   └── vendor_update_docs
+├── myproject
+│   ├── asgi.py
+│   ├── __init__.py
+│   ├── __pycache__
+│   ├── settings.py
+│   ├── urls.py
+│   ├── views.py
+│   └── wsgi.py
+├── README.md
+├── requirements.txt
+├── t.txt
+└── vendor
+    ├── admin.py
+    ├── apps.py
+    ├── __init__.py
+    ├── migrations
+    ├── models.py
+    ├── __pycache__
+    ├── tests.py
+    ├── urls.py
+    └── views.py
