@@ -458,7 +458,7 @@ class LoginView(APIView):
 
         # সব ঠিক থাকলে টোকেন দাও
         refresh = RefreshToken.for_user(user)
-        lifetime = timedelta(days=30) if serializer.validated_data.get('remember_me', False) else timedelta(days=7)
+        lifetime = timedelta(days=900) if serializer.validated_data.get('remember_me', False) else timedelta(days=7)
         refresh.set_exp(lifetime=lifetime)
 
         refresh_token_str = str(refresh)
@@ -475,14 +475,14 @@ class LoginView(APIView):
             refresh_token=refresh_token_str,
             access_token=access_token_str,
             refresh_token_expires_at=timezone.now() + refresh.lifetime,
-            access_token_expires_at=timezone.now() + timedelta(minutes=15),
+            access_token_expires_at=timezone.now() + timedelta(days=365),
         )
 
         logger.info(f"সফল লগইন: {user.email} ({user.role})")
 
         return Response({
             "access_token": access_token_str,
-            "access_token_expires_in": 900,
+            "access_token_expires_in": 365*24*60,
             "refresh_token": refresh_token_str,
             "refresh_token_expires_in": int(refresh.lifetime.total_seconds()),
             "token_type": "Bearer",
@@ -550,14 +550,14 @@ class ForgotPasswordView(APIView):
                 code = user.generate_password_reset_code()
                 send_mail(
                     'Password Reset',
-                    f'Your OTP is {code}. Expires in 15 minutes.',
+                    f'Your OTP is {code}. Expires in 5 minutes.',
                     settings.DEFAULT_FROM_EMAIL,
                     [user.email],
                     fail_silently=False,
                 )
             logger.info(f"Password reset requested for: {email}")
             return Response({
-                "message": "If the email exists, a password reset OTP has been sent. Expires in 15 minutes."
+                "message": "If the email exists, a password reset OTP has been sent. Expires in 5 minutes."
             }, status=status.HTTP_200_OK)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -663,7 +663,6 @@ class Verify2FAView(APIView):
 
 
 # authentication/views.py
-
 from django.db import transaction
 from django.views.decorators.cache import never_cache
 from django.utils.decorators import method_decorator
@@ -674,29 +673,29 @@ from rest_framework.permissions import IsAuthenticated
 from .models import Profile
 from .serializers import UserProfileSerializer, ProfileUpdateSerializer
 import logging
-from rest_framework.parsers import MultiPartParser, FormParser
+from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
+from django.contrib.auth import get_user_model
+from django.core.files.storage import default_storage
 
+User = get_user_model()
 logger = logging.getLogger(__name__)
 
 
 @method_decorator(never_cache, name='dispatch')
 class MeView(APIView):
     permission_classes = [IsAuthenticated]
-    parser_classes = [MultiPartParser, FormParser]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]  # JSON + Multipart + Form
 
     def get(self, request):
-        # সবসময় ফ্রেশ ডাটা নিচ্ছি
         user = User.objects.select_related('profile').get(pk=request.user.pk)
         serializer = UserProfileSerializer(user, context={'request': request})
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     def put(self, request):
         profile, _ = Profile.objects.get_or_create(user=request.user)
-
-        # এই লাইনটা পুরোপুরি বদলে দাও — files= আর লাগবে না!
         serializer = ProfileUpdateSerializer(
             instance=profile,
-            data=request.data,           # শুধু request.data দিলেই হবে
+            data=request.data,           # শুধু request.data ব্যবহার
             context={'request': request},
             partial=True
         )
@@ -714,7 +713,6 @@ class MeView(APIView):
             # পুরানো ইমেজ ডিলিট (যদি নতুন আসে)
             if old_image and old_image != profile.image:
                 if hasattr(old_image, 'path') and old_image.path != profile.image.path:
-                    from django.core.files.storage import default_storage
                     if default_storage.exists(old_image.path):
                         default_storage.delete(old_image.path)
 
@@ -728,7 +726,7 @@ class MeView(APIView):
         }, status=status.HTTP_200_OK)
 
     def patch(self, request):
-        # PATCH ও PUT একই কাজ করে
+        # PATCH PUT-এর মতোই কাজ করবে
         return self.put(request)
 
     def delete(self, request):
