@@ -165,11 +165,14 @@ class VendorProfileUpdateRequestAdmin(admin.ModelAdmin):
         return format_html(f'<b style="color:{colors[obj.status]}">{obj.get_status_display()}</b>')
     status_badge.short_description = "Status"
 
+        
     def action_buttons(self, obj):
         if obj.status != 'pending':
             return "Done"
-        approve_url = reverse('admin:approve_update', args=[obj.id])
-        reject_url = reverse('admin:reject_update', args=[obj.id])
+        
+        approve_url = reverse('admin_approve_update', args=[obj.id])
+        reject_url = reverse('admin_reject_update', args=[obj.id])
+        
         return format_html(
             f'<a href="{approve_url}" style="color:green; margin-right:10px;">Approve</a>'
             f'<a href="{reject_url}" style="color:red;">Reject</a>'

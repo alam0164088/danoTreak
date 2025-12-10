@@ -10,14 +10,15 @@ from .views import (
     GoogleLoginView, GoogleCallbackView, AppleLoginView,  # AppleCallbackView নেই!
     MyReferralCodeView, CompleteVendorProfileView,
     VendorProfileUpdateRequestView, approve_vendor_update_request,
-    reject_vendor_update_request, NearbyVendorsAPI, CategoryNearbyVendorsAPI,
-    AdminAllVendorCredentialsView, ToggleFavoriteVendor, MyFavoriteVendorsAPI,AdminPendingVendorUpdateRequestsView
+    reject_vendor_update_request,user_nearby_vendors, CategoryNearbyVendorsAPI,
+    AdminAllVendorCredentialsView, ToggleFavoriteVendor, MyFavoriteVendorsAPI,AdminPendingVendorUpdateRequestsView,AllVendorsListView
 )
 
 urlpatterns = [
     path('register/', RegisterView.as_view(), name='register'),
     path('vendor-signup/', VendorSignUpView.as_view(), name='vendor_signup'),
     path('complete-vendor-profile/', CompleteVendorProfileView.as_view(), name='complete_vendor_profile'),
+    path("vendors/", AllVendorsListView.as_view()),
 
     # Vendor Update Requests
     path('vendor/update-request/', VendorProfileUpdateRequestView.as_view(), name='vendor_update_request'),
@@ -30,7 +31,7 @@ urlpatterns = [
     # Nearby & Favorites
     path('toggle-favorite/', ToggleFavoriteVendor.as_view(), name='toggle-favorite'),
     path('my-favorites-vendor/', MyFavoriteVendorsAPI.as_view(), name='my-favorites'),
-    path('api/nearby-vendors/', NearbyVendorsAPI.as_view(), name='nearby-vendors'),
+    path('user/nearby-vendors/', user_nearby_vendors, name='user_nearby_vendors'),
     path('api/nearby-category/', CategoryNearbyVendorsAPI.as_view(), name='nearby-category'),
 
     # Admin
