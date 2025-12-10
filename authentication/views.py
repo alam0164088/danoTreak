@@ -1201,6 +1201,52 @@ class CompleteVendorProfileView(APIView):
                 "review_count": vendor.review_count or 0
             }
         }, status=200)
+    
+
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
+from django.contrib.auth import get_user_model
+from rest_framework.permissions import AllowAny
+
+User = get_user_model()
+
+class AllVendorsListView(APIView):
+    permission_classes = [AllowAny]   # চাইলে IsAuthenticated করতে পারো
+
+    def get(self, request):
+        vendors = User.objects.filter(role="vendor")
+
+        data = []
+
+        for user in vendors:
+            if not hasattr(user, "vendor_profile"):
+                continue
+
+            v = user.vendor_profile
+
+            data.append({
+                "id": user.id,
+                "vendor_name": v.vendor_name,
+                "shop_name": v.shop_name,
+                "phone_number": v.phone_number,
+                "shop_address": v.shop_address,
+                "category": v.category,
+                "latitude": str(v.latitude) if v.latitude else "",
+                "longitude": str(v.longitude) if v.longitude else "",
+                "shop_images": v.shop_images or [],
+                "description": v.description or "",
+                "activities": v.activities or [],
+                "rating": float(v.rating) if v.rating else 0.0,
+                "review_count": v.review_count or 0
+            })
+
+        return Response({
+            "success": True,
+            "total_vendors": len(data),
+            "vendors": data
+        }, status=200)
+
 
 # authentication/views.py → CompleteVendorProfileView এর নিচে যোগ করো
 # ================== VENDOR: প্রোফাইল আপডেট রিকোয়েস্ট করা ==================
@@ -1747,49 +1793,106 @@ def calculate_distance(lat1, lon1, lat2, lon2):
     return R * c
 
 
-# নিকটস্থ দোকান (শুধু লগইন করলে দেখাবে)
-class NearbyVendorsAPI(APIView):
-    permission_classes = [IsAuthenticated]   # ← এই লাইনটা আনকমেন্ট কর + IsAuthenticated দে
 
-    def get(self, request):
-        try:
-            user_lat = float(request.query_params.get('lat'))
-            user_lng = float(request.query_params.get('lng'))
-        except (TypeError, ValueError):
-            return Response({"success": False, "message": "lat ও lng দিতে হবে"}, status=400)
+import math
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from authentication.models import Vendor
 
-        vendors = Vendor.objects.filter(
-            is_profile_complete=True,
-            latitude__isnull=False,
-            longitude__isnull=False
+
+def haversine_distance(lat1, lon1, lat2, lon2):
+    """
+    দুই লোকেশনের মধ্যে দূরত্ব হিসাব (মিটারে)
+    """
+    R = 6371  # পৃথিবীর ব্যাসার্ধ (কিলোমিটারে)
+    lat1, lon1, lat2, lon2 = map(math.radians, [float(lat1), float(lon1), float(lat2), float(lon2)])
+    dlat = lat2 - lat1
+    dlon = lon2 - lon1
+    a = math.sin(dlat / 2)**2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2)**2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    distance_meters = R * c * 1000  # মিটারে কনভার্ট
+    return distance_meters
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def user_nearby_vendors(request):
+    """
+    ইউজারদের জন্য নিকটস্থ দোকানের API
+    - লগইন করা ইউজার lat, lng দিয়ে কাছাকাছি দোকান দেখতে পারবে
+    - শুধুমাত্র প্রোফাইল কমপ্লিট করা এবং লোকেশন সেট করা দোকান দেখাবে
+    - দূরত্ব সহ সর্ট করা (কাছেরটা আগে)
+    - রেডিয়াস: ২ কিলোমিটার (২০০০ মিটার)
+    """
+    user_lat = request.query_params.get('lat')
+    user_lng = request.query_params.get('lng')
+
+    if not user_lat or not user_lng:
+        return Response({
+            "success": False,
+            "message": "lat এবং lng প্যারামিটার দিতে হবে। উদাহরণ: ?lat=23.810350&lng=90.412550"
+        }, status=400)
+
+    try:
+        user_lat = float(user_lat)
+        user_lng = float(user_lng)
+    except ValueError:
+        return Response({
+            "success": False,
+            "message": "lat এবং lng সঠিক সংখ্যা হতে হবে"
+        }, status=400)
+
+    # শুধুমাত্র প্রোফাইল কমপ্লিট এবং লোকেশন সেট করা ভেন্ডর
+    vendors = Vendor.objects.filter(
+        is_profile_complete=True,
+        latitude__isnull=False,
+        longitude__isnull=False
+    )
+
+    nearby_vendors = []
+
+    for vendor in vendors:
+        distance_meters = haversine_distance(
+            user_lat, user_lng,
+            vendor.latitude, vendor.longitude
         )
 
-        result = []
-        for v in vendors:
-            distance = calculate_distance(user_lat, user_lng, float(v.latitude), float(v.longitude))
-            if distance <= 1.0:  # ১ কিমি’র মধ্যে
-                result.append({
-                    "id": v.id,
-                    "shop_name": v.shop_name,
-                    "vendor_name": v.vendor_name,
-                    "category": v.category,
-                    "rating": float(v.rating),
-                    "review_count": v.review_count,
-                    "distance_km": round(distance, 2),
-                    "shop_image": v.shop_images[0] if v.shop_images else None,
-                    "phone": v.phone_number
-                })
+        # ২ কিলোমিটারের মধ্যে
+        if distance_meters <= 2000:
+            nearby_vendors.append({
+                "id": vendor.id,
+                "vendor_name": vendor.vendor_name or "N/A",
+                "shop_name": vendor.shop_name or "N/A",
+                "phone_number": vendor.phone_number or "N/A",
+                "email": vendor.user.email if hasattr(vendor, 'user') and vendor.user else "N/A",  # ← নতুন যোগ করা
+                "shop_address": vendor.shop_address or "N/A",
+                "category": vendor.category or "others",
+                "description": vendor.description or "",
+                "activities": vendor.activities or [],
+                "rating": float(vendor.rating) if vendor.rating else 0.0,
+                "review_count": vendor.review_count or 0,
+                "shop_images": vendor.shop_images or [],
+                "distance_meters": round(distance_meters, 1),
+                "location": {
+                    "latitude": str(vendor.latitude),
+                    "longitude": str(vendor.longitude)
+                }
+            })
 
-        result = sorted(result, key=lambda x: x['distance_km'])
+    # দূরত্ব অনুযায়ী সর্ট করা (কাছেরটা আগে)
+    nearby_vendors.sort(key=lambda x: x['distance_meters'])
 
-        return Response({
-            "success": True,
-            "your_location": {"lat": user_lat, "lng": user_lng},
-            "total_nearby": len(result),
-            "vendors": result
-        })
-
-
+    return Response({
+        "success": True,
+        "your_location": {
+            "lat": user_lat,
+            "lng": user_lng
+        },
+        "search_radius_meters": 2000,
+        "total_found": len(nearby_vendors),
+        "vendors": nearby_vendors
+    }, status=200)
 
 
 
@@ -1905,6 +2008,9 @@ class ToggleFavoriteVendor(APIView):
             FavoriteVendor.objects.create(user=request.user, vendor=vendor)
             is_favorite = True
             message = "ফেভারিটে যোগ করা হয়েছে"
+
+
+
 
         return Response({
             "success": True,

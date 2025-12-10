@@ -5,7 +5,6 @@ from rest_framework.response import Response
 from rest_framework import status
 from django.utils import timezone
 from datetime import timedelta
-from django.contrib.gis.geos import Point
 from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404
 from .models import Campaign, Visitor, Visit, Redemption
@@ -15,7 +14,11 @@ from .models import Campaign, Visitor, Visit, Redemption
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def dashboard_overview(request):
-    vendor = request.user.vendor_profile
+    try:
+        vendor = request.user.vendor_profile
+    except AttributeError:
+        return Response({"error": "Vendor profile not found. Are you logged in as a vendor?"}, status=403)
+
     return Response({
         "total_visitor": Visitor.objects.filter(vendor=vendor).count(),
         "activate_campaign": Campaign.objects.filter(vendor=vendor, is_active=True).count(),
@@ -28,25 +31,41 @@ def dashboard_overview(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def user_management(request):
-    vendor = request.user.vendor_profile
-    visitors = Visitor.objects.filter(vendor=vendor).values('id', 'name', 'phone', 'total_visits', 'is_blocked')
+    try:
+        vendor = request.user.vendor_profile
+    except AttributeError:
+        return Response({"error": "Vendor profile not found. Are you logged in as a vendor?"}, status=403)
+
+    visitors = Visitor.objects.filter(vendor=vendor).values(
+        'id', 'name', 'phone', 'total_visits', 'is_blocked'
+    ).order_by('-total_visits', '-created_at')
+
     return Response({"visitors": list(visitors)})
 
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def campaign_list(request):
-    vendor = request.user.vendor_profile
+    try:
+        vendor = request.user.vendor_profile
+    except AttributeError:
+        return Response({"error": "Vendor profile not found. Are you logged in as a vendor?"}, status=403)
+
     campaigns = Campaign.objects.filter(vendor=vendor).annotate(
         redemption_number=Count('redemptions', filter=Q(redemptions__status='redeemed'))
     ).values('id', 'name', 'reward_name', 'required_visits', 'reward_description', 'is_active', 'created_at', 'redemption_number')
+
     return Response({"campaigns": list(campaigns)})
 
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def redeem_history(request):
-    vendor = request.user.vendor_profile
+    try:
+        vendor = request.user.vendor_profile
+    except AttributeError:
+        return Response({"error": "Vendor profile not found. Are you logged in as a vendor?"}, status=403)
+
     history = Redemption.objects.filter(campaign__vendor=vendor).select_related('visitor', 'campaign').values(
         'id', 'visitor__id', 'visitor__name', 'visitor__phone', 'visitor__total_visits',
         'campaign__name', 'campaign__reward_name', 'status', 'aliffited_id', 'redeemed_at'
@@ -58,7 +77,11 @@ def redeem_history(request):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def create_campaign(request):
-    vendor = request.user.vendor_profile
+    try:
+        vendor = request.user.vendor_profile
+    except AttributeError:
+        return Response({"error": "Vendor profile not found"}, status=403)
+
     data = request.data
 
     campaign = Campaign.objects.create(
@@ -79,7 +102,11 @@ def create_campaign(request):
 @api_view(['PUT'])
 @permission_classes([IsAuthenticated])
 def update_campaign(request, campaign_id):
-    vendor = request.user.vendor_profile
+    try:
+        vendor = request.user.vendor_profile
+    except AttributeError:
+        return Response({"error": "Vendor profile not found"}, status=403)
+
     campaign = get_object_or_404(Campaign, id=campaign_id, vendor=vendor)
     
     campaign.name = request.data.get('name', campaign.name)
@@ -104,7 +131,11 @@ def update_campaign(request, campaign_id):
 @api_view(['DELETE'])
 @permission_classes([IsAuthenticated])
 def delete_campaign(request, campaign_id):
-    vendor = request.user.vendor_profile
+    try:
+        vendor = request.user.vendor_profile
+    except AttributeError:
+        return Response({"error": "Vendor profile not found"}, status=403)
+
     campaign = get_object_or_404(Campaign, id=campaign_id, vendor=vendor)
     campaign.delete()
     return Response({"message": "Campaign deleted successfully!"})
@@ -114,7 +145,12 @@ def delete_campaign(request, campaign_id):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def block_visitor(request, visitor_id):
-    visitor = get_object_or_404(Visitor, id=visitor_id, vendor=request.user.vendor_profile)
+    try:
+        vendor = request.user.vendor_profile
+    except AttributeError:
+        return Response({"error": "Vendor profile not found"}, status=403)
+
+    visitor = get_object_or_404(Visitor, id=visitor_id, vendor=vendor)
     visitor.is_blocked = not visitor.is_blocked
     visitor.save()
     return Response({"is_blocked": visitor.is_blocked})
@@ -123,7 +159,12 @@ def block_visitor(request, visitor_id):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def confirm_redemption(request, redemption_id):
-    redemption = get_object_or_404(Redemption, id=redemption_id, campaign__vendor=request.user.vendor_profile)
+    try:
+        vendor = request.user.vendor_profile
+    except AttributeError:
+        return Response({"error": "Vendor profile not found"}, status=403)
+
+    redemption = get_object_or_404(Redemption, id=redemption_id, campaign__vendor=vendor)
     if redemption.status == 'pending':
         redemption.status = 'redeemed'
         redemption.aliffited_id = request.data.get('aliffited_id', f"ALFF{redemption.id:05d}")
@@ -134,13 +175,8 @@ def confirm_redemption(request, redemption_id):
         "aliffited_id": redemption.aliffited_id
     })
 
-# vendor/views.py এর শেষে যোগ করো (পুরানো checkin ফাংশনটা মুছে ফেলো)
 
-# vendor/views.py → auto_checkin ফাংশনটা এভাবে রাখো (পুরোটা কপি-পেস্ট করো)
-# vendor/views.py (শুধু auto_checkin ফাংশনটা পুরোটা রিপ্লেস করো)
-
-from django.contrib.gis.geos import Point
-
+# ==================== AUTO CHECKIN ====================
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def auto_checkin(request):
@@ -156,23 +192,19 @@ def auto_checkin(request):
             "error": "lat, lng and vendor_id are required and must be numbers"
         }, status=400)
 
-    # ২. ভেন্ডর খুঁজে পাওয়া
-    from authentication.models import Vendor as VendorProfile
+    # ২. ভেন্ডর লোড করা
+    from authentication.models import Vendor
     try:
-        vendor = VendorProfile.objects.get(id=vendor_id)
-    except VendorProfile.DoesNotExist:
+        vendor = Vendor.objects.get(id=vendor_id)
+    except Vendor.DoesNotExist:
         return Response({"error": "Shop not found"}, status=404)
 
-    # ৩. লোকেশন আছে কিনা চেক
+    # ৩. শপের লোকেশন চেক
     if vendor.latitude is None or vendor.longitude is None:
         return Response({"error": "Shop location not set by owner"}, status=400)
 
-    # Decimal → float সেফলি
-    try:
-        shop_lat = float(vendor.latitude)
-        shop_lng = float(vendor.longitude)
-    except (TypeError, ValueError):
-        return Response({"error": "Invalid shop coordinates"}, status=500)
+    shop_lat = float(vendor.latitude)
+    shop_lng = float(vendor.longitude)
 
     # ৪. দূরত্ব হিসাব (Haversine)
     from math import radians, sin, cos, sqrt, atan2
@@ -192,31 +224,48 @@ def auto_checkin(request):
             "max_allowed_meters": 100
         }, status=400)
 
-    # ৫. ফোন নম্বর ক্লিন করা (সবচেয়ে গুরুত্বপূর্ণ ফিক্স)
-    try:
-        raw_phone = user.profile.phone or ""
-        if not raw_phone.strip():
-            return Response({"error": "Please set phone number in your profile"}, status=400)
+    # ৫. ফোন নম্বর (অপশনাল) ক্লিন করা
+    phone = None
+    if hasattr(user, 'profile') and user.profile.phone:
+        raw_phone = user.profile.phone.strip()
+        if raw_phone:
+            phone_digits = "".join(filter(str.isdigit, raw_phone.replace("+880", "0")))
+            if len(phone_digits) >= 11:
+                phone = "0" + phone_digits[-10:]
+            elif len(phone_digits) > 0:
+                phone = phone_digits
 
-        # +880, space, -, () সব রিমুভ করো
-        phone_digits = "".join(filter(str.isdigit, raw_phone.replace("+880", "0")))
-        
-        # শেষের ১১ ডিজিট নিয়ে 0 দিয়ে শুরু করো
-        if len(phone_digits) >= 11:
-            phone = "0" + phone_digits[-10:]  # 017xxxxxxxxx
-        else:
-            return Response({"error": "Invalid phone number"}, status=400)
+    # ৬. Visitor খোঁজা/তৈরি করা
+    visitor = None
+    if phone:
+        visitor = Visitor.objects.filter(vendor=vendor, phone=phone).first()
 
-    except AttributeError:
-        return Response({"error": "Profile not found. Please complete your profile."}, status=400)
+    if not visitor:
+        unique_name_hint = f"User_{user.id}"
+        visitor = Visitor.objects.filter(
+            vendor=vendor,
+            name__contains=unique_name_hint
+        ).first()
 
-    # ৬. Visitor তৈরি/খুঁজে পাওয়া
-    visitor, created = Visitor.objects.get_or_create(
-        vendor=vendor,
-        phone=phone,
-        defaults={'name': user.get_full_name() or user.email.split('@')[0]}
-    )
+    if not visitor:
+        name = user.get_full_name() or user.email.split('@')[0]
+        if not phone:
+            name = f"{name} (User_{user.id})"
+        visitor = Visitor.objects.create(
+            vendor=vendor,
+            phone=phone or "",
+            name=name
+        )
+    else:
+        if not visitor.name or "Guest" in visitor.name or "User_" not in visitor.name:
+            new_name = user.get_full_name() or user.email.split('@')[0]
+            if not phone:
+                new_name = f"{new_name} (User_{user.id})"
+            visitor.name = new_name
+            visitor.phone = phone or visitor.phone
+            visitor.save()
 
+    # ব্লক চেক
     if visitor.is_blocked:
         return Response({"error": "You are blocked from this shop"}, status=403)
 
@@ -228,13 +277,12 @@ def auto_checkin(request):
             "total_visits": visitor.total_visits
         }, status=200)
 
-    # ৮. চেক-ইন সেভ করা (PointField দিয়ে)
+    # ৮. চেক-ইন সেভ করা
     Visit.objects.create(
-    visitor=visitor,
-    vendor=vendor,
-    lat=lat,
-    lng=lng,
-
+        visitor=visitor,
+        vendor=vendor,
+        lat=lat,
+        lng=lng,
     )
 
     visitor.total_visits += 1

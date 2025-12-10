@@ -267,6 +267,7 @@ class PasswordResetSession(models.Model):
 # --------------------------
 class Profile(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
+    full_name = models.CharField(max_length=255, blank=True, null=True)
     employee_id = models.CharField(max_length=20, unique=True, blank=True)
     phone = models.CharField(max_length=20, blank=True)
     image = models.ImageField(upload_to='profile_images/', default='profile_images/default_profile.png')
@@ -275,13 +276,23 @@ class Profile(models.Model):
 
     def __str__(self):
         return f"Profile for {self.user.email}"
-
     def save(self, *args, **kwargs):
         if not self.employee_id:
-            last_count = Profile.objects.count() + 1
-            self.employee_id = f"EMP{last_count:03d}"
+            # Safe & unique employee_id generation (no duplicate ever)
+            from django.db import transaction
+            with transaction.atomic():
+                # লক করে সর্বশেষ EMP নম্বর নেওয়া হবে
+                last_profile = Profile.objects.select_for_update().order_by('-id').first()
+                if last_profile and last_profile.employee_id:
+                    try:
+                        last_num = int(last_profile.employee_id.replace('EMP', ''))
+                        new_num = last_num + 1
+                    except ValueError:
+                        new_num = 1
+                else:
+                    new_num = 1
+                self.employee_id = f"EMP{new_num:03d}"
         super().save(*args, **kwargs)
-
 
 # --------------------------
 # EMAIL OTP
