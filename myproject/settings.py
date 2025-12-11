@@ -50,6 +50,7 @@ INSTALLED_APPS = [
     "authentication",
     'vendor',
     'django.contrib.gis',
+    'ai',
 
     
 ]
@@ -93,9 +94,12 @@ REST_FRAMEWORK = {
     ),
 }
 
+
 SIMPLE_JWT = {
-    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=60),
-    "REFRESH_TOKEN_LIFETIME": timedelta(days=30),
+    "ACCESS_TOKEN_LIFETIME": timedelta(days=365),   # ১ বছর
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=365*9),  # ৯ বছর
+    "ROTATE_REFRESH_TOKENS": False,
+    "BLACKLIST_AFTER_ROTATION": False,
 }
 
 # ===================== TEMPLATES =====================
@@ -137,9 +141,11 @@ CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
-    "http://localhost:5000",
     "http://10.10.7.19:3000",
+    "http://10.10.7.86:3000",   # এটা যোগ করুন
 ]
+
+# অথবা আরো সহজে – পুরো লোকাল নেটওয়ার্ককে allow করুন
 
 # ===================== ALLAUTH =====================
 ACCOUNT_LOGIN_METHODS = {"email"}                      # নতুন + সঠিক

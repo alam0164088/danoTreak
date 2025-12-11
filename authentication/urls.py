@@ -10,7 +10,7 @@ from .views import (
     GoogleLoginView, GoogleCallbackView, AppleLoginView,  # AppleCallbackView নেই!
     MyReferralCodeView, CompleteVendorProfileView,
     VendorProfileUpdateRequestView, approve_vendor_update_request,
-    reject_vendor_update_request,user_nearby_vendors, CategoryNearbyVendorsAPI,
+    reject_vendor_update_request,user_nearby_vendors, category_nearby_vendors,
     AdminAllVendorCredentialsView, ToggleFavoriteVendor, MyFavoriteVendorsAPI,AdminPendingVendorUpdateRequestsView,AllVendorsListView
 )
 
@@ -32,7 +32,7 @@ urlpatterns = [
     path('toggle-favorite/', ToggleFavoriteVendor.as_view(), name='toggle-favorite'),
     path('my-favorites-vendor/', MyFavoriteVendorsAPI.as_view(), name='my-favorites'),
     path('user/nearby-vendors/', user_nearby_vendors, name='user_nearby_vendors'),
-    path('api/nearby-category/', CategoryNearbyVendorsAPI.as_view(), name='nearby-category'),
+    path('category-nearby-vendors/', category_nearby_vendors, name='category_nearby_vendors'),
 
     # Admin
     path('admin/all-vendor-credentials/', AdminAllVendorCredentialsView.as_view(), name='all-vendor-credentials'),
