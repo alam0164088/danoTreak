@@ -39,7 +39,7 @@ User = get_user_model()
 
 
 class RegisterView(APIView):
-    """Handle user registration with optional email verification OTP."""
+    
     permission_classes = [AllowAny]
 
     def post(self, request):
@@ -96,11 +96,7 @@ class RegisterView(APIView):
 
 
 class VendorSignUpView(APIView):
-    """
-    ভেন্ডর নিজে নিজে সাইনআপ করবে → শুধু ইমেইল + পাসওয়ার্ড
-    → কোনো OTP ভেরিফাই লাগবে না
-    → is_active = False (এডমিন approve করলে active হবে)
-    """
+   
     permission_classes = [AllowAny]
 
     def post(self, request):
@@ -464,10 +460,7 @@ class LoginView(APIView):
         refresh_token_str = str(refresh)
         access_token_str = str(refresh.access_token)
 
-        # এই লাইনটা সমস্যার মূল কারণ ছিল — এটা মুছে ফেলো!
-        # Token.objects.update_or_create(...)  ← এটা আর ব্যবহার করো না!
-
-        # এই নতুন কোডটা বসাও — ডুপ্লিকেট টোকেন এরর চিরতরে শেষ!
+       
         Token.objects.filter(user=user).delete()  # পুরানো টোকেন মুছে ফেলো
         Token.objects.create(
             user=user,
@@ -1425,11 +1418,7 @@ from datetime import timedelta
 
 
 class AdminPendingVendorUpdateRequestsView(APIView):
-    """
-    এডমিনের জন্য: শুধুমাত্র পেন্ডিং ভেন্ডর প্রোফাইল আপডেট রিকোয়েস্ট দেখা
-    → পুরানো vs নতুন ভ্যালু সাইড বাই সাইড
-    → বাংলা লেবেল, টাইম এগো, ডকুমেন্ট, ছবি সব
-    """
+   
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
@@ -1723,11 +1712,7 @@ def approve_vendor_update_request(request, request_id):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def reject_vendor_update_request(request, request_id):
-    """
-    এডমিন রিকোয়েস্ট রিজেক্ট করে + কারণ দিতে পারে
-    URL: POST /admin/reject-update/<int:request_id>/
-    Body: { "reason": "NID ছবি অস্পষ্ট" }
-    """
+    
     if request.user.role != 'admin':
         return Response({"success": False, "message": "শুধুমাত্র এডমিন"}, status=403)
 
@@ -1783,7 +1768,7 @@ import math
 
 
 def calculate_distance(lat1, lon1, lat2, lon2):
-    """Haversine Formula — খুবই সঠিক + হালকা"""
+    
     R = 6371  # Earth radius in km
     lat1, lon1, lat2, lon2 = map(math.radians, [lat1, lon1, lat2, lon2])
     dlat = lat2 - lat1
@@ -1802,9 +1787,7 @@ from authentication.models import Vendor
 
 
 def haversine_distance(lat1, lon1, lat2, lon2):
-    """
-    দুই লোকেশনের মধ্যে দূরত্ব হিসাব (মিটারে)
-    """
+  
     R = 6371  # পৃথিবীর ব্যাসার্ধ (কিলোমিটারে)
     lat1, lon1, lat2, lon2 = map(math.radians, [float(lat1), float(lon1), float(lat2), float(lon2)])
     dlat = lat2 - lat1
@@ -1818,13 +1801,7 @@ def haversine_distance(lat1, lon1, lat2, lon2):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def user_nearby_vendors(request):
-    """
-    ইউজারদের জন্য নিকটস্থ দোকানের API
-    - লগইন করা ইউজার lat, lng দিয়ে কাছাকাছি দোকান দেখতে পারবে
-    - শুধুমাত্র প্রোফাইল কমপ্লিট করা এবং লোকেশন সেট করা দোকান দেখাবে
-    - দূরত্ব সহ সর্ট করা (কাছেরটা আগে)
-    - রেডিয়াস: ২ কিলোমিটার (২০০০ মিটার)
-    """
+
     user_lat = request.query_params.get('lat')
     user_lng = request.query_params.get('lng')
 
@@ -1897,50 +1874,97 @@ def user_nearby_vendors(request):
 
 
 
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
 
-# ক্যাটাগরি অনুযায়ী নিকটস্থ দোকান (শুধু লগইন করলে)
-class CategoryNearbyVendorsAPI(APIView):
-    permission_classes = [IsAuthenticated]   # ← এই লাইনটা আনকমেন্ট কর + IsAuthenticated দে
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def category_nearby_vendors(request):
+    """
+    ইউজারদের জন্য ক্যাটাগরি অনুযায়ী নিকটস্থ দোকানের API
+    - লগইন করা ইউজার lat, lng এবং category দিয়ে কাছাকাছি দোকান দেখতে পারবে
+    - শুধুমাত্র প্রোফাইল কমপ্লিট করা এবং লোকেশন সেট করা দোকান দেখাবে
+    - দূরত্ব অনুযায়ী সর্ট করা (কাছেরটা আগে)
+    - রেডিয়াস: ২ কিলোমিটার
+    """
+    user_lat = request.query_params.get('lat')
+    user_lng = request.query_params.get('lng')
+    category = request.query_params.get('category')
 
-    def get(self, request):
-        try:
-            user_lat = float(request.query_params.get('lat'))
-            user_lng = float(request.query_params.get('lng'))
-            category = request.query_params.get('category')
-        except (TypeError, ValueError):
-            return Response({"success": False, "message": "lat, lng, category দিতে হবে"}, status=400)
+    if not user_lat or not user_lng:
+        return Response({
+            "success": False,
+            "message": "lat এবং lng প্যারামিটার দিতে হবে। উদাহরণ: ?lat=23.810350&lng=90.412550"
+        }, status=400)
 
-        if not category:
-            return Response({"success": False, "message": "category পাঠান"}, status=400)
+    if not category:
+        return Response({
+            "success": False,
+            "message": "category প্যারামিটার দিতে হবে"
+        }, status=400)
 
-        vendors = Vendor.objects.filter(
-            is_profile_complete=True,
-            latitude__isnull=False,
-            longitude__isnull=False,
-            category=category.lower()
+    try:
+        user_lat = float(user_lat)
+        user_lng = float(user_lng)
+    except ValueError:
+        return Response({
+            "success": False,
+            "message": "lat এবং lng সঠিক সংখ্যা হতে হবে"
+        }, status=400)
+
+    # প্রোফাইল কমপ্লিট এবং লোকেশন সেট করা ভেন্ডর
+    vendors = Vendor.objects.filter(
+        is_profile_complete=True,
+        latitude__isnull=False,
+        longitude__isnull=False,
+        category__iexact=category.strip()
+    )
+
+
+    nearby_vendors = []
+
+    for vendor in vendors:
+        distance_meters = haversine_distance(
+            user_lat, user_lng,
+            vendor.latitude, vendor.longitude
         )
 
-        result = []
-        for v in vendors:
-            distance = calculate_distance(user_lat, user_lng, float(v.latitude), float(v.longitude))
-            if distance <= 1.0:
-                result.append({
-                    "id": v.id,
-                    "shop_name": v.shop_name,
-                    "rating": float(v.rating),
-                    "review_count": v.review_count,
-                    "distance_km": round(distance, 2),
-                    "image": v.shop_images[0] if v.shop_images else None
-                })
+        if distance_meters <= 2000:  # ২ কিলোমিটার
+            nearby_vendors.append({
+                "id": vendor.id,
+                "vendor_name": vendor.vendor_name or "N/A",
+                "shop_name": vendor.shop_name or "N/A",
+                "phone_number": vendor.phone_number or "N/A",
+                "email": vendor.user.email if hasattr(vendor, 'user') and vendor.user else "N/A",
+                "shop_address": vendor.shop_address or "N/A",
+                "category": vendor.category or "others",
+                "description": vendor.description or "",
+                "activities": vendor.activities or [],
+                "rating": float(vendor.rating) if vendor.rating else 0.0,
+                "review_count": vendor.review_count or 0,
+                "shop_images": vendor.shop_images or [],
+                "distance_meters": round(distance_meters, 1),
+                "location": {
+                    "latitude": str(vendor.latitude),
+                    "longitude": str(vendor.longitude)
+                }
+            })
 
-        result = sorted(result, key=lambda x: x['distance_km'])
+    nearby_vendors.sort(key=lambda x: x['distance_meters'])
 
-        return Response({
-            "success": True,
-            "category": category,
-            "total_found": len(result),
-            "vendors": result
-        })
+    return Response({
+        "success": True,
+        "your_location": {
+            "lat": user_lat,
+            "lng": user_lng
+        },
+        "search_radius_meters": 2000,
+        "category": category,
+        "total_found": len(nearby_vendors),
+        "vendors": nearby_vendors
+    }, status=200)
+
 # views.py এর শেষে যোগ করো
 
 from rest_framework.views import APIView

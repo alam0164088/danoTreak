@@ -9,6 +9,7 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/', include('authentication.urls')),
     path('api/vendor/', include('vendor.urls')),
+    path("api/ai/", include("ai.urls")),
     
     
     # 🔹 allauth routes add করুন
