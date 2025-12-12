@@ -11,10 +11,12 @@ from .views import (
     MyReferralCodeView, CompleteVendorProfileView,
     VendorProfileUpdateRequestView, approve_vendor_update_request,
     reject_vendor_update_request,user_nearby_vendors, category_nearby_vendors,
-    AdminAllVendorCredentialsView, ToggleFavoriteVendor, MyFavoriteVendorsAPI,AdminPendingVendorUpdateRequestsView,AllVendorsListView
+    AdminAllVendorCredentialsView, ToggleFavoriteVendor, MyFavoriteVendorsAPI,AdminPendingVendorUpdateRequestsView,AllVendorsListView,live_users_location_view,
 )
 
 urlpatterns = [
+    
+    path('live-users/', live_users_location_view, name='live_users'),
     path('register/', RegisterView.as_view(), name='register'),
     path('vendor-signup/', VendorSignUpView.as_view(), name='vendor_signup'),
     path('complete-vendor-profile/', CompleteVendorProfileView.as_view(), name='complete_vendor_profile'),
@@ -29,10 +31,13 @@ urlpatterns = [
 
 
     # Nearby & Favorites
+    
     path('toggle-favorite/', ToggleFavoriteVendor.as_view(), name='toggle-favorite'),
     path('my-favorites-vendor/', MyFavoriteVendorsAPI.as_view(), name='my-favorites'),
     path('user/nearby-vendors/', user_nearby_vendors, name='user_nearby_vendors'),
-    path('category-nearby-vendors/', category_nearby_vendors, name='category_nearby_vendors'),
+    # Nearby & Favorites
+    path('category-nearby-vendors/<str:category>/', category_nearby_vendors, name='category_nearby_vendors'),
+
 
     # Admin
     path('admin/all-vendor-credentials/', AdminAllVendorCredentialsView.as_view(), name='all-vendor-credentials'),
@@ -63,3 +68,4 @@ urlpatterns = [
     path("auth/google/callback/", GoogleCallbackView.as_view(), name="google_callback"),
     path("auth/apple/login/", AppleLoginView.as_view(), name="apple_login"),
 ]
+

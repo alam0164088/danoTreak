@@ -27,12 +27,16 @@ APPEND_SLASH = False
 
 # ===================== APPLICATIONS =====================
 INSTALLED_APPS = [
+    'daphne',                    # ← ১. সবার উপরে daphne
+    'channels',                  # ← ২. তারপর channels
+
+    # Django built-in apps
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
     "django.contrib.sessions",
     "django.contrib.messages",
-    "django.contrib.staticfiles",
+    "django.contrib.staticfiles",   # ← এটা এখানে
     "django.contrib.sites",
 
     # Third-party
@@ -48,11 +52,9 @@ INSTALLED_APPS = [
 
     # Local apps
     "authentication",
-    'vendor',
-    'django.contrib.gis',
-    'ai',
-
-    
+    "vendor",
+    "django.contrib.gis",
+    "ai",
 ]
 
 # ===================== MIDDLEWARE =====================
@@ -180,3 +182,17 @@ TIME_ZONE = "Asia/Dhaka"
 USE_I18N = True
 USE_TZ = True
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+
+# settings.py এর শেষের দিকে যোগ করো
+
+# ASGI Application (WebSocket এর জন্য)
+ASGI_APPLICATION = "myproject.asgi.application"
+
+# Channels + Redis (Live Location এর জন্য)
+# Redis ছাড়াই চলবে (ডেভেলপমেন্টের জন্য পারফেক্ট)
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels.layers.InMemoryChannelLayer"
+    }
+}
