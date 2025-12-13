@@ -2019,10 +2019,6 @@ class AdminAllVendorCredentialsView(APIView):
 
 from .models import FavoriteVendor
 
-# favorite add 
-
-# views.py
-# ================== ফেভারিট ভেন্ডর টগল (Love বাটন) ==================
 class ToggleFavoriteVendor(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -2047,14 +2043,11 @@ class ToggleFavoriteVendor(APIView):
             is_favorite = True
             message = "ফেভারিটে যোগ করা হয়েছে"
 
-
-
-
         return Response({
             "success": True,
             "message": message,
             "is_favorite": is_favorite,
-            "total_favorites": vendor.favorited_by.count()
+            "total_favorites": vendor.favorited_by.count()  # assuming related_name='favorited_by'
         })
 
 
@@ -2064,7 +2057,6 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from .models import FavoriteVendor
-
 
 def calculate_distance(lat1, lon1, lat2, lon2):
     """Returns distance in kilometers using Haversine formula"""
@@ -2089,17 +2081,26 @@ def calculate_distance(lat1, lon1, lat2, lon2):
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
     return R * c  # kilometers
 
-
 class MyFavoriteVendorsAPI(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        # User location required
+        # ===============================
+        # ইউজারের প্রোফাইল থেকে লোকেশন নেওয়া
+        # ===============================
         try:
-            user_lat = float(request.query_params.get("lat"))
-            user_lng = float(request.query_params.get("lng"))
+            profile = request.user.profile
+            user_lat = getattr(profile, 'latitude', None)
+            user_lng = getattr(profile, 'longitude', None)
         except:
-            return Response({"success": False, "message": "lat & lng required"}, status=400)
+            user_lat = None
+            user_lng = None
+
+        if user_lat is None or user_lng is None:
+            return Response({
+                "success": False,
+                "message": "তোমার প্রোফাইলে লোকেশন নেই। অনুগ্রহ করে আপডেট করো।"
+            }, status=400)
 
         favorites = FavoriteVendor.objects.filter(user=request.user).select_related('vendor')
 
@@ -2112,7 +2113,7 @@ class MyFavoriteVendorsAPI(APIView):
             if v.latitude is None or v.longitude is None:
                 continue
 
-            # Calculate distance (force float conversion)
+            # Calculate distance
             distance_km = calculate_distance(
                 user_lat,
                 user_lng,
@@ -2131,7 +2132,7 @@ class MyFavoriteVendorsAPI(APIView):
                 "shop_name": v.shop_name,
                 "vendor_name": v.vendor_name,
                 "category": v.category,
-                "rating": float(v.rating),
+                "rating": float(v.rating) if v.rating else 0.0,
                 "review_count": v.review_count,
                 "shop_image": v.shop_images[0] if v.shop_images else None,
                 "phone": v.phone_number,
@@ -2155,6 +2156,7 @@ class MyFavoriteVendorsAPI(APIView):
             "total_favorites_within_5km": len(vendor_list),
             "my_favorites": vendor_list
         })
+
     
 
 
