@@ -1078,27 +1078,38 @@ class MyReferralCodeView(APIView):
 # ============================
 import uuid
 import json
-from decimal import Decimal, InvalidOperation
-from django.core.files.storage import default_storage
-from rest_framework.parsers import MultiPartParser, FormParser
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework import status
-from rest_framework.permissions import IsAuthenticated
-from django.core.exceptions import ObjectDoesNotExist
 import re
+from decimal import Decimal
+from django.conf import settings
+from django.core.files.storage import default_storage
+from django.core.exceptions import ObjectDoesNotExist
+from rest_framework.views import APIView
+from rest_framework.parsers import MultiPartParser, FormParser
+from rest_framework.response import Response
+from rest_framework.permissions import IsAuthenticated
+from rest_framework import status
+
+# helper import
+# from .utils import update_vendor_rating  # যদি আগের মতো rating refresh করতে চাও
 
 
 class CompleteVendorProfileView(APIView):
     permission_classes = [IsAuthenticated]
-    parser_classes = [MultiPartParser, FormParser]  # ইমেজ + FormData এর জন্য জরুরি!
+    parser_classes = [MultiPartParser, FormParser]
 
+    # =========================
+    # GET PROFILE
+    # =========================
     def get(self, request):
-        if request.user.role != 'vendor':
+        if request.user.role != "vendor":
             return Response({"success": False, "message": "Access denied"}, status=403)
 
         try:
             vendor = request.user.vendor_profile
+
+            # rating refresh (optional)
+            # update_vendor_rating(vendor)
+
             return Response({
                 "success": True,
                 "profile_complete": vendor.is_profile_complete,
@@ -1112,103 +1123,131 @@ class CompleteVendorProfileView(APIView):
                     "longitude": str(vendor.longitude) if vendor.longitude else "",
                     "shop_images": vendor.shop_images or [],
                     "description": vendor.description or "",
-                    "activities": vendor.activities or [],  # এখানে লিস্ট আসবে
-                    "rating": float(vendor.rating) if vendor.rating else 0.0,
+                    "activities": vendor.activities or [],
+                    "rating": float(vendor.rating or 0),
                     "review_count": vendor.review_count or 0,
                 }
             }, status=200)
+
         except ObjectDoesNotExist:
             return Response({
                 "success": True,
                 "profile_complete": False,
                 "message": "প্রোফাইল তৈরি করুন",
-                "vendor": { "shop_images": [], "activities": [], "description": "" }
+                "vendor": {
+                    "shop_images": [],
+                    "activities": [],
+                    "description": ""
+                }
             }, status=200)
 
+    # =========================
+    # POST / UPDATE PROFILE
+    # =========================
     def post(self, request):
-        if request.user.role != 'vendor':
+        if request.user.role != "vendor":
             return Response({"success": False, "message": "Access denied"}, status=403)
 
         try:
             vendor = request.user.vendor_profile
         except ObjectDoesNotExist:
-            return Response({"success": False, "message": "প্রোফাইল পাওয়া যায়নি।"}, status=404)
+            return Response({"success": False, "message": "প্রোফাইল পাওয়া যায়নি"}, status=404)
 
         data = request.data
-        files = request.FILES
 
-        # === ইমেজ আপলোড ===
-        uploaded_images = []
-        if 'shop_images' in files:
-            for img_file in files.getlist('shop_images'):
-                ext = img_file.name.split('.')[-1] if '.' in img_file.name else 'jpg'
-                filename = f"{uuid.uuid4().hex}.{ext}"
-                file_path = default_storage.save(f'vendor_shops/{filename}', img_file)
-                img_url = request.build_absolute_uri(settings.MEDIA_URL + file_path)
-                uploaded_images.append(img_url)
+        # =========================
+        # REQUIRED BASIC FIELDS
+        # =========================
+        required = ["vendor_name", "shop_name", "phone_number",
+                    "shop_address", "category", "latitude", "longitude"]
 
-        if not uploaded_images:
-            uploaded_images = vendor.shop_images or []
-
-        # === activities সঠিকভাবে হ্যান্ডল করা (মূল সমাধান!) ===
-        activities = vendor.activities or []
-
-        if 'activities' in data:
-            acts_input = data['activities']
-
-            if isinstance(acts_input, str) and acts_input.strip():
-                # যদি স্ট্রিং হয় (FormData থেকে আসলে এমনই হয়)
-                try:
-                    # প্রথমে JSON পার্স করার চেষ্টা
-                    parsed = json.loads(acts_input)
-                    if isinstance(parsed, list):
-                        activities = [str(item).strip() for item in parsed if str(item).strip()]
-                    else:
-                        activities = []
-                except:
-                    # JSON না হলে কমা দিয়ে স্প্লিট করো
-                    activities = [item.strip() for item in acts_input.split(',') if item.strip()]
-            elif isinstance(acts_input, list):
-                activities = [str(item).strip() for item in acts_input if str(item).strip()]
-
-        # === বাকি ফিল্ড ভ্যালিডেশন ===
-        required = ['vendor_name', 'shop_name', 'phone_number', 'shop_address', 'category', 'latitude', 'longitude']
         missing = [f for f in required if not data.get(f)]
         if missing:
-            return Response({"success": False, "message": f"এই ফিল্ডগুলো দিন: {', '.join(missing)}"}, status=400)
+            return Response({
+                "success": False,
+                "message": f"এই ফিল্ডগুলো দিন: {', '.join(missing)}"
+            }, status=400)
 
-        # ফোন নম্বর
-        phone = str(data['phone_number']).strip()
+        # =========================
+        # PHONE
+        # =========================
+        phone = str(data["phone_number"]).strip()
         if phone.startswith("+880"):
             phone = "0" + phone[4:]
         if not re.match(r"^01[3-9]\d{8}$", phone):
             return Response({"success": False, "message": "সঠিক মোবাইল নম্বর দিন"}, status=400)
 
-        # ল্যাট-লং
+        # =========================
+        # LAT / LNG
+        # =========================
         try:
-            lat = Decimal(str(data['latitude']))
-            lng = Decimal(str(data['longitude']))
+            lat = Decimal(str(data["latitude"]))
+            lng = Decimal(str(data["longitude"]))
         except:
             return Response({"success": False, "message": "ল্যাটিটিউড ও লংগিটিউড সঠিক দিন"}, status=400)
 
-        # === সবকিছু সেভ করি ===
-        vendor.vendor_name = data['vendor_name'].strip()
-        vendor.shop_name = data['shop_name'].strip()
+        # =========================
+        # RATING & REVIEW COUNT
+        # =========================
+        rating = vendor.rating
+        review_count = vendor.review_count
+
+        if "rating" in data:
+            try:
+                rating = float(data["rating"])
+                if rating < 0 or rating > 5:
+                    return Response(
+                        {"success": False, "message": "rating 0 থেকে 5 এর মধ্যে হতে হবে"},
+                        status=400
+                    )
+            except:
+                return Response({"success": False, "message": "rating সংখ্যা হতে হবে"}, status=400)
+
+        if "review_count" in data:
+            try:
+                review_count = int(data["review_count"])
+                if review_count < 0:
+                    return Response(
+                        {"success": False, "message": "review_count নেগেটিভ হতে পারে না"},
+                        status=400
+                    )
+            except:
+                return Response({"success": False, "message": "review_count সংখ্যা হতে হবে"}, status=400)
+
+        # =========================
+        # ACTIVITIES FIX
+        # =========================
+        activities = vendor.activities or []
+        if "activities" in data:
+            acts = data.get("activities")
+            if isinstance(acts, str):
+                # "football,game , sleep" => ["football","game","sleep"]
+                activities = [a.strip() for a in acts.split(",") if a.strip()]
+            elif isinstance(acts, list):
+                activities = [str(a).strip() for a in acts if str(a).strip()]
+
+        # =========================
+        # SAVE
+        # =========================
+        vendor.vendor_name = data["vendor_name"].strip()
+        vendor.shop_name = data["shop_name"].strip()
         vendor.phone_number = phone
-        vendor.shop_address = data['shop_address'].strip()
-        vendor.category = data['category']
+        vendor.shop_address = data["shop_address"].strip()
+        vendor.category = data["category"]
         vendor.latitude = lat
         vendor.longitude = lng
-        vendor.description = data.get('description', vendor.description or '')
+        vendor.description = data.get("description", "")
         vendor.activities = activities
-        vendor.shop_images = uploaded_images
+        vendor.shop_images = vendor.shop_images or []
+        vendor.rating = rating
+        vendor.review_count = review_count
         vendor.is_profile_complete = True
         vendor.save()
 
         return Response({
             "success": True,
-            "message": "প্রোফাইল সফলভাবে আপডেট হয়েছে!",
             "profile_complete": True,
+            "message": "প্রোফাইল সফলভাবে আপডেট হয়েছে!",
             "vendor": {
                 "vendor_name": vendor.vendor_name,
                 "shop_name": vendor.shop_name,
@@ -1219,11 +1258,12 @@ class CompleteVendorProfileView(APIView):
                 "longitude": str(vendor.longitude),
                 "shop_images": vendor.shop_images,
                 "description": vendor.description,
-                "activities": vendor.activities,  # এখন ঠিক আসবে!
-                "rating": float(vendor.rating) if vendor.rating else 0.0,
-                "review_count": vendor.review_count or 0
+                "activities": vendor.activities,
+                "rating": vendor.rating,
+                "review_count": vendor.review_count
             }
         }, status=200)
+
     
 
 from rest_framework.views import APIView
@@ -1897,6 +1937,10 @@ def user_nearby_vendors(request):
         "vendors": nearby_vendors
     }, status=200)
 
+
+
+
+
 import math
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
@@ -1976,6 +2020,9 @@ def category_nearby_vendors(request, category):  # এখানে category path
         "total_found": len(nearby_vendors),
         "vendors": nearby_vendors
     }, status=200)
+
+
+
 
 
 

@@ -1,7 +1,7 @@
 from django.urls import path
 from .views import (
     GetLocationAPI, ChatNormalAPI, ChatPlacesAPI, ChatBeverageAPI,
-    ChatLodgingAPI, ChatActivitiesAPI, ChatItineraryAPI,ChatRestaurantAPI
+    ChatLodgingAPI, ChatActivitiesAPI, ChatItineraryAPI,ChatRestaurantAPI, CategoryNearbyAI
 )
 
 urlpatterns = [
@@ -13,4 +13,5 @@ urlpatterns = [
     path("chat/lodging/", ChatLodgingAPI.as_view()),
     path("chat/activities/", ChatActivitiesAPI.as_view()),
     path("chat/itinerary/", ChatItineraryAPI.as_view()),
+    path("chat/CategoryNearbyAI/", CategoryNearbyAI.as_view())
 ]
