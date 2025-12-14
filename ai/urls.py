@@ -5,7 +5,7 @@ from .views import (
 )
 
 urlpatterns = [
-    path("location/", GetLocationAPI.as_view()),
+    path("location/", GetLocationAPI.as_view(), name="get_location"),
     path("chat/normal/", ChatNormalAPI.as_view()),
     path("chat/places/", ChatPlacesAPI.as_view()),
     path("chat/restaurant/", ChatRestaurantAPI.as_view(), name="chat_restaurant"),

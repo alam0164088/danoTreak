@@ -728,6 +728,7 @@ class ChatPlacesAPI(APIView):
 
         data, code = call_ai_api("/chat/places", final_payload, token)
         return Response(data, status=code)
+    
 
 
 
@@ -825,9 +826,7 @@ class ChatActivitiesAPI(APIView):
 
         data, code = call_ai_api("/chat/activities", final_payload, token)
         return Response(data, status=code)
-
-
-
+    
 
 class ChatItineraryAPI(APIView):
     permission_classes = [IsUser]
@@ -864,42 +863,64 @@ class ChatItineraryAPI(APIView):
         # ফ্রন্টএন্ডকে AI এর রেসপন্স 그대로 পাঠাও
         return Response(data, status=code)
     
-# ===============================
-# Individual Chat endpoints (extends BaseChatAPI)
-# ===============================
 
+    
+# from rest_framework.views import APIView
+# from rest_framework.response import Response
+# from rest_framework import status
+# from .permissions import IsUser
+# import requests
+
+# BASE_AI_URL = "http://10.10.7.82:8005"
+
+# # ইউজারের লোকেশন নেওয়ার helper ফাংশন
+# def get_user_location(request):
+#     try:
+#         profile = request.user.profile
+#         lat = getattr(profile, "latitude", None)
+#         lng = getattr(profile, "longitude", None)
+#         if lat is None or lng is None:
+#             return None, None
+#         return float(lat), float(lng)
+#     except AttributeError:
+#         return None, None
+
+# # AI API কল করার helper ফাংশন
+# def call_ai_api(endpoint, payload, token=None):
+#     try:
+#         headers = {"Authorization": f"Bearer {token}"} if token else {}
+#         url = f"{BASE_AI_URL}{endpoint}"
+#         response = requests.post(url, json=payload, headers=headers, timeout=100)  # Timeout 10 সেকেন্ড
+#         return response.json(), response.status_code
+#     except requests.RequestException as e:
+#         return {"error": str(e)}, 500
+
+# API ভিউ
 class GetLocationAPI(APIView):
     permission_classes = [IsUser]
 
     def post(self, request):
-        token = request.auth
+        token = getattr(request, 'auth', None)
         user_lat, user_lng = get_user_location(request)
 
-        if not user_lat or not user_lng:
-            return Response({"success": False, "message": "লোকেশন পাওয়া যায়নি।"}, status=400)
+        if user_lat is None or user_lng is None:
+            return Response({
+                "success": False,
+                "message": "লোকেশন পাওয়া যায়নি। প্রোফাইল আপডেট করুন।"
+            }, status=status.HTTP_400_BAD_REQUEST)
 
-        # frontend থেকে message বা destination নেওয়া
-        message = request.data.get("message", "plan a trip")
-        destination = request.data.get("destination", {"city": "Dhaka", "country": "Bangladesh"})
+        category = request.data.get("category")
+        if not category:
+            return Response({
+                "success": False,
+                "message": "category প্রয়োজন"
+            }, status=status.HTTP_400_BAD_REQUEST)
 
-        # AI সার্ভারের payload
         payload = {
-            "user_input": message,
+            "category": category,
             "latitude": user_lat,
-            "longitude": user_lng,
-            "destination": destination
+            "longitude": user_lng
         }
 
-        # AI API কল
-        data, code = call_ai_api("/chat/itinerary", payload, token)
-
-        # AI response print করে debug
-        print("AI response:", data)
-
-        # itinerary extract করা
-        itinerary = data.get("daily_itinerary", [])
-
-        return Response({
-            "success": True,
-            "itinerary": itinerary
-        }, status=code)
+        data, code = call_ai_api("/get_location", payload, token)
+        return Response(data, status=code)
