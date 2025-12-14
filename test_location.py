@@ -2,8 +2,7 @@ import asyncio
 import websockets
 import json
 
-TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzk3MDk4MDk4LCJpYXQiOjE3NjU1NjIwOTgsImp0aSI6IjUxN2Q0NDZkYTNmNTQ2ZmU5MTkzODU0OWYyYmQ0NWMxIiwidXNlcl9pZCI6IjEyOSJ9.FGHFXhoakEskb0b1GYqDFkeOiuK6AAnrDOM0kx_ANTI"
-
+TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzk3MTgwMTgwLCJpYXQiOjE3NjU2NDQxODAsImp0aSI6IjRiY2NhMjFkMzE2OTRiYjViY2Y4YTNmMzRjZTkxMDAwIiwidXNlcl9pZCI6IjEyOSJ9.X8MVrPv0HGXfDdyJBHLCbbQ9b03YtDzyKidJwuP2XTg"
 async def main():
     uri = f"ws://127.0.0.1:8000/ws/location/?token={TOKEN}"
     try:
@@ -23,7 +22,7 @@ async def main():
                 except asyncio.TimeoutError:
                     pass
 
-                await asyncio.sleep(5)  # প্রতি ৫ সেকেন্ডে update
+                await asyncio.sleep(20)  # প্রতি ৫ সেকেন্ডে update
     except Exception as e:
         print("Error:", e)
 
