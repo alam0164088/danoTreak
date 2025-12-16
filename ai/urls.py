@@ -1,7 +1,7 @@
 from django.urls import path
 from .views import (
     GetLocationAPI, ChatNormalAPI, ChatPlacesAPI, ChatBeverageAPI,
-    ChatLodgingAPI, ChatActivitiesAPI,ChatRestaurantAPI, CategoryNearbyAI,ChatItineraryAPI,ToggleFavoriteVendor,MyFavoriteVendorsAPI
+    ChatLodgingAPI, ChatActivitiesAPI,ChatRestaurantAPI, CategoryNearbyAI,ChatItineraryAPI,ToggleFavoriteVendor,MyFavoriteVendorsAPI,NearbyCampaignVendorsAPI
 )
 
 urlpatterns = [
@@ -18,5 +18,9 @@ urlpatterns = [
     path("chat/lodging/", ChatLodgingAPI.as_view()),
     path("chat/activities/", ChatActivitiesAPI.as_view()),
     path("chat/itinerary/", ChatItineraryAPI.as_view()),
-    path("chat/CategoryNearbyAI/", CategoryNearbyAI.as_view())
+    path("chat/CategoryNearbyAI/", CategoryNearbyAI.as_view()),
+    path('vendors/nearby-campaigns/', NearbyCampaignVendorsAPI.as_view(), name='nearby-campaign-vendors')
+
+    
 ]
+

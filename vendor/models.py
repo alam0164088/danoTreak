@@ -1,3 +1,5 @@
+# vendor/models.py
+
 from django.db import models
 from authentication.models import Vendor as VendorProfile, User
 

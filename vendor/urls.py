@@ -2,6 +2,7 @@
 from django.urls import path
 from . import views
 
+
 urlpatterns = [
     path('dashboard/', views.dashboard_overview),
     path('users/', views.user_management),
@@ -12,5 +13,6 @@ urlpatterns = [
     path('redeem-history/', views.redeem_history),
     path('block/<int:visitor_id>/', views.block_visitor),
     path('confirm/<int:redemption_id>/', views.confirm_redemption),
-    path('checkin/', views.auto_checkin),
+  
+    
 ]

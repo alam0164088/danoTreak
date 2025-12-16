@@ -11,8 +11,7 @@ from django.shortcuts import get_object_or_404
 
 from authentication.models import Vendor
 from .models import Campaign, Visitor, Visit, Redemption
-from vendor.utils import generate_aliffited_id
-
+from .utils import generate_aliffited_id
 
 
 
@@ -196,73 +195,3 @@ def confirm_redemption(request, redemption_id):
         "aliffited_id": redemption.aliffited_id
     })
 
-
-
-@api_view(['POST'])
-@permission_classes([IsAuthenticated])
-def auto_checkin(request):
-    user = request.user
-
-    try:
-        lat = float(request.data['lat'])
-        lng = float(request.data['lng'])
-        vendor_id = int(request.data['vendor_id'])
-    except:
-        return Response({"message": "lat, lng, vendor_id required"}, status=400)
-
-    vendor = get_object_or_404(Vendor, id=vendor_id)
-
-    # Distance check (100m)
-    R = 6371000
-    φ1, λ1 = radians(lat), radians(lng)
-    φ2, λ2 = radians(float(vendor.latitude)), radians(float(vendor.longitude))
-
-    a = sin((φ2-φ1)/2)**2 + cos(φ1)*cos(φ2)*sin((λ2-λ1)/2)**2
-    distance = R * 2 * atan2(sqrt(a), sqrt(1-a))
-
-    if distance > 100:
-        return Response({"message": "Too far"}, status=400)
-
-    visitor, _ = Visitor.objects.get_or_create(
-        vendor=vendor,
-        user=user,
-        defaults={"name": user.username}
-    )
-
-    if visitor.is_blocked:
-        return Response({"message": "Blocked"}, status=403)
-
-    if Visit.objects.filter(
-        visitor=visitor,
-        timestamp__gte=timezone.now() - timedelta(minutes=5)
-    ).exists():
-        return Response({"message": "Already checked in"})
-
-    Visit.objects.create(visitor=visitor, vendor=vendor, lat=lat, lng=lng)
-    visitor.total_visits += 1
-    visitor.save()
-
-    campaign = Campaign.objects.filter(
-        vendor=vendor,
-        is_active=True,
-        required_visits=visitor.total_visits
-    ).first()
-
-    reward = None
-    if campaign:
-        redemption, created = Redemption.objects.get_or_create(
-            visitor=visitor,
-            campaign=campaign,
-            defaults={
-                "status": "pending",
-                "aliffited_id": generate_aliffited_id()
-            }
-        )
-        if created:
-            reward = campaign.reward_name
-
-    return Response({
-        "message": "Check-in successful",
-        "total_visits": visitor.total_visits,
-        "reward": reward
-    })
