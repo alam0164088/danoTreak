@@ -1,3 +1,5 @@
+
+#  authetication/models
 from django.db import models
 from django.contrib.auth.models import AbstractUser
 from django.utils.translation import gettext_lazy as _
@@ -215,17 +217,37 @@ class VendorProfileUpdateRequest(models.Model):
 
 class FavoriteVendor(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='favorite_vendors')
-    vendor = models.ForeignKey(Vendor, on_delete=models.CASCADE, related_name='favorited_by')
+    
+    # DB Vendor এর জন্য
+    vendor = models.ForeignKey(
+        'Vendor',  # তোমার Vendor মডেলের নাম
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='favorited_by'
+    )
+    
+    # AI Vendor এর জন্য (UUID string)
+    ai_vendor_id = models.CharField(max_length=255, null=True, blank=True)
+    
+    # AI Vendor এর ডাটা সেভ করার জন্য (যাতে পরে দেখানো যায়)
+    ai_vendor_data = models.JSONField(null=True, blank=True)  # পুরো ডিকশনারি সেভ করবে
+    
+    # AI Vendor হলে ৭ দিন পর অটো ডিলিট
+    expiry_date = models.DateTimeField(null=True, blank=True)
+    
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        unique_together = ('user', 'vendor')  # একই ভেন্ডর একবারই ফেভারিট করা যাবে
+        unique_together = ('user', 'vendor', 'ai_vendor_id')  # একই ভেন্ডর একবারই ফেভারিট
         ordering = ['-created_at']
 
     def __str__(self):
-        return f"{self.user.email} ❤️ {self.vendor.shop_name}"
-
-
+        if self.vendor:
+            return f"{self.user.email} ❤️ {self.vendor.shop_name}"
+        else:
+            name = self.ai_vendor_data.get('shop_name', 'AI Vendor') if self.ai_vendor_data else 'AI Vendor'
+            return f"{self.user.email} ❤️ {name} (AI)"
 
 
 

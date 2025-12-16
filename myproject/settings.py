@@ -193,6 +193,6 @@ ASGI_APPLICATION = "myproject.asgi.application"
 # Redis ছাড়াই চলবে (ডেভেলপমেন্টের জন্য পারফেক্ট)
 CHANNEL_LAYERS = {
     "default": {
-        "BACKEND": "channels.layers.InMemoryChannelLayer"
-    }
+        "BACKEND": "channels.layers.InMemoryChannelLayer",
+    },
 }

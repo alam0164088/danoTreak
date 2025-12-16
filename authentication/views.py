@@ -149,18 +149,44 @@ class VendorSignUpView(APIView):
 
 
 # authentication/views.py এর শেষে যোগ করো
+# authentication/views.py
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from authentication.consumers import ONLINE_USERS
+from authentication.models import Profile  # user profile থেকে lat/lng আনব
+from datetime import datetime
 
-from django.http import JsonResponse
-from .consumers import LIVE_USERS
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def live_users_view(request):
+    live_users_data = []
 
-def live_users_location_view(request):
-    users = list(LIVE_USERS.values())
-    return JsonResponse({
+    for user_id in ONLINE_USERS:
+        try:
+            profile = Profile.objects.get(user_id=user_id)
+            live_users_data.append({
+                "user_id": user_id,
+                "latitude": profile.latitude,
+                "longitude": profile.longitude,
+                "last_seen": profile.updated_at.strftime("%H:%M:%S") if hasattr(profile, "updated_at") else None
+            })
+        except Profile.DoesNotExist:
+            live_users_data.append({
+                "user_id": user_id,
+                "latitude": None,
+                "longitude": None,
+                "last_seen": None
+            })
+
+    return Response({
         "success": True,
-        "total_online": len(users),
-        "live_users": users,
-        "timestamp": __import__('datetime').datetime.now().strftime("%H:%M:%S")
+        "total_online": len(ONLINE_USERS),
+        "live_users": live_users_data,
+        "timestamp": datetime.now().strftime("%H:%M:%S")
     })
+
+
 
 class InitialAdminSignUpView(APIView):
     """Handle initial admin signup (only one admin allowed initially)."""
@@ -389,6 +415,141 @@ class VerifyOTPView(APIView):
         return Response({"ok": False, "error": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
 
+# from datetime import timedelta
+# from django.utils import timezone
+# from django.core.mail import send_mail
+# from rest_framework.views import APIView
+# from rest_framework.response import Response
+# from rest_framework import status
+# from rest_framework.permissions import AllowAny
+# from rest_framework_simplejwt.tokens import RefreshToken
+# from authentication.models import User, Token
+# from authentication.serializers import LoginSerializer
+# from django.conf import settings
+# from channels.layers import get_channel_layer
+# from asgiref.sync import async_to_sync
+# import logging
+
+# logger = logging.getLogger(__name__)
+
+# class LoginView(APIView):
+#     permission_classes = [AllowAny]
+
+#     def post(self, request):
+#         serializer = LoginSerializer(data=request.data)
+#         if not serializer.is_valid():
+#             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+#         email = serializer.validated_data['email'].lower().strip()
+#         password = serializer.validated_data['password']
+#         user = User.objects.filter(email=email).first()
+
+#         if not user:
+#             return Response({"detail": "ইমেইল বা পাসওয়ার্ড ভুল।"}, status=401)
+
+#         if not user.check_password(password):
+#             return Response({"detail": "ইমেইল বা পাসওয়ার্ড ভুল।"}, status=401)
+
+#         # ভেন্ডর হলে শুধু OTP চেক না করাই
+#         if user.role != 'vendor':
+#             if not user.is_email_verified:
+#                 return Response({
+#                     "detail": "ইমেইল ভেরিফাই করা হয়নি। আপনার ইমেইলে পাঠানো OTP দিয়ে ভেরিফাই করুন।",
+#                     "next_step": "verify_email_otp"
+#                 }, status=403)
+
+#             if not user.is_active:
+#                 return Response({
+#                     "detail": "আপনার একাউন্ট সক্রিয় করা হয়নি। সাপোর্টে যোগাযোগ করুন।"
+#                 }, status=403)
+#         else:
+#             # ভেন্ডরের জন্য শুধু is_active চেক
+#             if not user.is_active:
+#                 return Response({
+#                     "detail": "আপনার ভেন্ডর একাউন্ট এখনো সক্রিয় করা হয়নি।",
+#                     "contact_admin": True
+#                 }, status=403)
+
+#         # প্রথম লগইন পপআপ
+#         first_login_popup = False
+#         if not user.first_login_done:
+#             first_login_popup = True
+#             user.first_login_done = True
+#             user.save(update_fields=['first_login_done'])
+
+#         # 2FA চেক
+#         if user.is_2fa_enabled:
+#             code = user.generate_email_verification_code()
+#             send_mail(
+#                 '2FA ভেরিফিকেশন কোড',
+#                 f'আপনার 2FA OTP: {code}\nমেয়াদ: ৫ মিনিট',
+#                 settings.DEFAULT_FROM_EMAIL,
+#                 [user.email],
+#                 fail_silently=True,
+#             )
+#             return Response({
+#                 "detail": "2FA প্রয়োজন। ইমেইলে OTP পাঠানো হয়েছে।",
+#                 "next_step": "verify_2fa_otp",
+#                 "first_login_popup": first_login_popup
+#             }, status=206)
+
+#         # টোকেন তৈরি করা
+#         refresh = RefreshToken.for_user(user)
+#         lifetime = timedelta(days=900) if serializer.validated_data.get('remember_me', False) else timedelta(days=7)
+#         refresh.set_exp(lifetime=lifetime)
+
+#         refresh_token_str = str(refresh)
+#         access_token_str = str(refresh.access_token)
+
+#         Token.objects.filter(user=user).delete()
+#         Token.objects.create(
+#             user=user,
+#             email=user.email,
+#             refresh_token=refresh_token_str,
+#             access_token=access_token_str,
+#             refresh_token_expires_at=timezone.now() + refresh.lifetime,
+#             access_token_expires_at=timezone.now() + timedelta(days=365),
+#         )
+
+#         logger.info(f"সফল লগইন: {user.email} ({user.role})")
+
+#         # শুধুমাত্র সাধারণ ইউজার (role='user') হলে লাইভ ট্র্যাকিং গ্রুপে যোগ করো
+#         if user.role == 'user':
+#             channel_layer = get_channel_layer()
+#             if channel_layer:
+#                 async_to_sync(channel_layer.group_send)(
+#                     "live_location_group",
+#                     {
+#                         "type": "user_online",
+#                         "user_id": user.id,
+#                         "email": user.email,
+#                         "full_name": user.full_name or "User",
+#                         "message": f"{user.email} is now online and being tracked"
+#                     }
+#                 )
+
+#         # ফাইনাল রেসপন্স
+#         return Response({
+#             "access_token": access_token_str,
+#             "access_token_expires_in": 365 * 24 * 60,
+#             "refresh_token": refresh_token_str,
+#             "refresh_token_expires_in": int(refresh.lifetime.total_seconds()),
+#             "token_type": "Bearer",
+#             "first_login_popup": first_login_popup,
+#             "user": {
+#                 "id": user.id,
+#                 "email": user.email,
+#                 "full_name": user.full_name or "",
+#                 "role": user.role,
+#                 "is_active": user.is_active,
+#                 "email_verified": user.is_email_verified
+#             }
+#         }, status=200)
+
+
+# authentication/views.py
+# authentication/views.py
+
 from datetime import timedelta
 from django.utils import timezone
 from django.core.mail import send_mail
@@ -397,11 +558,16 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import AllowAny
 from rest_framework_simplejwt.tokens import RefreshToken
-from authentication.models import User, Token
+
+from vendor.models import Visitor, Visit, Campaign, Redemption
+from authentication.models import User, Vendor, Token
 from authentication.serializers import LoginSerializer
 from django.conf import settings
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
+from math import radians, sin, cos, sqrt, atan2
+from vendor.utils import generate_aliffited_id
+
 import logging
 
 logger = logging.getLogger(__name__)
@@ -418,31 +584,21 @@ class LoginView(APIView):
         password = serializer.validated_data['password']
         user = User.objects.filter(email=email).first()
 
-        if not user:
+        if not user or not user.check_password(password):
             return Response({"detail": "ইমেইল বা পাসওয়ার্ড ভুল।"}, status=401)
 
-        if not user.check_password(password):
-            return Response({"detail": "ইমেইল বা পাসওয়ার্ড ভুল।"}, status=401)
-
-        # ভেন্ডর হলে শুধু OTP চেক না করাই
+        # ভেরিফিকেশন ও এক্টিভিটি চেক
         if user.role != 'vendor':
             if not user.is_email_verified:
                 return Response({
-                    "detail": "ইমেইল ভেরিফাই করা হয়নি। আপনার ইমেইলে পাঠানো OTP দিয়ে ভেরিফাই করুন।",
+                    "detail": "ইমেইল ভেরিফাই করা হয়নি। OTP দিয়ে ভেরিফাই করুন।",
                     "next_step": "verify_email_otp"
                 }, status=403)
-
             if not user.is_active:
-                return Response({
-                    "detail": "আপনার একাউন্ট সক্রিয় করা হয়নি। সাপোর্টে যোগাযোগ করুন।"
-                }, status=403)
+                return Response({"detail": "আপনার একাউন্ট সক্রিয় করা হয়নি।"}, status=403)
         else:
-            # ভেন্ডরের জন্য শুধু is_active চেক
             if not user.is_active:
-                return Response({
-                    "detail": "আপনার ভেন্ডর একাউন্ট এখনো সক্রিয় করা হয়নি।",
-                    "contact_admin": True
-                }, status=403)
+                return Response({"detail": "আপনার ভেন্ডর একাউন্ট সক্রিয় নয়।", "contact_admin": True}, status=403)
 
         # প্রথম লগইন পপআপ
         first_login_popup = False
@@ -467,7 +623,7 @@ class LoginView(APIView):
                 "first_login_popup": first_login_popup
             }, status=206)
 
-        # টোকেন তৈরি করা
+        # Token তৈরি
         refresh = RefreshToken.for_user(user)
         lifetime = timedelta(days=900) if serializer.validated_data.get('remember_me', False) else timedelta(days=7)
         refresh.set_exp(lifetime=lifetime)
@@ -487,7 +643,7 @@ class LoginView(APIView):
 
         logger.info(f"সফল লগইন: {user.email} ({user.role})")
 
-        # শুধুমাত্র সাধারণ ইউজার (role='user') হলে লাইভ ট্র্যাকিং গ্রুপে যোগ করো
+        # Live tracking (user only)
         if user.role == 'user':
             channel_layer = get_channel_layer()
             if channel_layer:
@@ -502,8 +658,9 @@ class LoginView(APIView):
                     }
                 )
 
-        # ফাইনাল রেসপন্স
-        return Response({
+        # ===== auto_checkin পুরোপুরি মুছে ফেলা হয়েছে =====
+
+        response_data = {
             "access_token": access_token_str,
             "access_token_expires_in": 365 * 24 * 60,
             "refresh_token": refresh_token_str,
@@ -518,7 +675,14 @@ class LoginView(APIView):
                 "is_active": user.is_active,
                 "email_verified": user.is_email_verified
             }
-        }, status=200)
+        }
+
+        return Response(response_data, status=200)
+
+
+
+
+
 
 
 class RefreshTokenView(APIView):
@@ -2061,150 +2225,7 @@ class AdminAllVendorCredentialsView(APIView):
             "total_vendors": len(credentials),
             "credentials": credentials
         })
-    
-
-
-from .models import FavoriteVendor
-
-class ToggleFavoriteVendor(APIView):
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request):
-        vendor_id = request.data.get('vendor_id')
-        if not vendor_id:
-            return Response({"success": False, "message": "vendor_id দিন"}, status=400)
-
-        try:
-            vendor = Vendor.objects.get(id=vendor_id)
-        except Vendor.DoesNotExist:
-            return Response({"success": False, "message": "দোকান পাওয়া যায়নি"}, status=404)
-
-        favorite = FavoriteVendor.objects.filter(user=request.user, vendor=vendor).first()
-
-        if favorite:
-            favorite.delete()
-            is_favorite = False
-            message = "ফেভারিট থেকে সরানো হয়েছে"
-        else:
-            FavoriteVendor.objects.create(user=request.user, vendor=vendor)
-            is_favorite = True
-            message = "ফেভারিটে যোগ করা হয়েছে"
-
-        return Response({
-            "success": True,
-            "message": message,
-            "is_favorite": is_favorite,
-            "total_favorites": vendor.favorited_by.count()  # assuming related_name='favorited_by'
-        })
-
-
-# ================== আমার সব ফেভারিট ভেন্ডর দেখা ==================
-import math
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
-from .models import FavoriteVendor
-
-def calculate_distance(lat1, lon1, lat2, lon2):
-    """Returns distance in kilometers using Haversine formula"""
-    R = 6371  # Earth radius in KM
-
-    # Convert all to float to avoid Decimal error
-    lat1 = float(lat1)
-    lon1 = float(lon1)
-    lat2 = float(lat2)
-    lon2 = float(lon2)
-
-    d_lat = math.radians(lat2 - lat1)
-    d_lon = math.radians(lon2 - lon1)
-
-    a = (
-        math.sin(d_lat / 2) ** 2
-        + math.cos(math.radians(lat1))
-        * math.cos(math.radians(lat2))
-        * math.sin(d_lon / 2) ** 2
-    )
-
-    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-    return R * c  # kilometers
-
-class MyFavoriteVendorsAPI(APIView):
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request):
-        # ===============================
-        # ইউজারের প্রোফাইল থেকে লোকেশন নেওয়া
-        # ===============================
-        try:
-            profile = request.user.profile
-            user_lat = getattr(profile, 'latitude', None)
-            user_lng = getattr(profile, 'longitude', None)
-        except:
-            user_lat = None
-            user_lng = None
-
-        if user_lat is None or user_lng is None:
-            return Response({
-                "success": False,
-                "message": "তোমার প্রোফাইলে লোকেশন নেই। অনুগ্রহ করে আপডেট করো।"
-            }, status=400)
-
-        favorites = FavoriteVendor.objects.filter(user=request.user).select_related('vendor')
-
-        vendor_list = []
-
-        for fav in favorites:
-            v = fav.vendor
-
-            # Vendor must have location
-            if v.latitude is None or v.longitude is None:
-                continue
-
-            # Calculate distance
-            distance_km = calculate_distance(
-                user_lat,
-                user_lng,
-                float(v.latitude),
-                float(v.longitude)
-            )
-
-            # Only vendors within 5 km
-            if distance_km > 5:
-                continue
-
-            distance_meter = distance_km * 1000
-
-            vendor_list.append({
-                "id": v.id,
-                "shop_name": v.shop_name,
-                "vendor_name": v.vendor_name,
-                "category": v.category,
-                "rating": float(v.rating) if v.rating else 0.0,
-                "review_count": v.review_count,
-                "shop_image": v.shop_images[0] if v.shop_images else None,
-                "phone": v.phone_number,
-                "added_at": fav.created_at.strftime("%d %b %Y"),
-
-                # Vendor location
-                "location": {
-                    "latitude": float(v.latitude),
-                    "longitude": float(v.longitude)
-                },
-
-                # Distance formatted
-                "distance": {
-                    "kilometer": round(distance_km, 2),
-                    "meter": int(distance_meter)
-                }
-            })
-
-        return Response({
-            "success": True,
-            "total_favorites_within_5km": len(vendor_list),
-            "my_favorites": vendor_list
-        })
-
-    
+ 
 
 
 
