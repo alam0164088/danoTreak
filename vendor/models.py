@@ -1,8 +1,5 @@
-# vendor/models.py
 from django.db import models
-from authentication.models import Vendor as VendorProfile
-from authentication.models import User  # User মডেল ইম্পোর্ট করা হয়েছে
-
+from authentication.models import Vendor as VendorProfile, User
 
 class Campaign(models.Model):
     vendor = models.ForeignKey(VendorProfile, on_delete=models.CASCADE, related_name='campaigns')
@@ -21,9 +18,9 @@ class Visitor(models.Model):
     vendor = models.ForeignKey(VendorProfile, on_delete=models.CASCADE, related_name='visitors')
     user = models.ForeignKey(
         User, 
-        on_delete=models.SET_NULL, 
-        null=True, 
-        blank=True, 
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
         related_name='visitor_records'
     )
     phone = models.CharField(max_length=20, db_index=True, blank=True, null=True)
@@ -32,9 +29,6 @@ class Visitor(models.Model):
     is_blocked = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
-    class Meta:
-        pass  # unique_together নেই — ফোন না থাকলে user দিয়ে ট্র্যাক হবে
-
     def __str__(self):
         return f"{self.name or self.phone or 'Anonymous'} ({self.total_visits} visits)"
 
@@ -42,17 +36,13 @@ class Visitor(models.Model):
 class Visit(models.Model):
     visitor = models.ForeignKey(Visitor, on_delete=models.CASCADE, related_name='visits')
     vendor = models.ForeignKey(VendorProfile, on_delete=models.CASCADE)
-    
     lat = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     lng = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
-    
     timestamp = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         ordering = ['-timestamp']
-        indexes = [
-            models.Index(fields=['timestamp']),
-        ]
+        indexes = [models.Index(fields=['timestamp'])]
 
     def __str__(self):
         return f"Visit by {self.visitor} at {self.timestamp}"
@@ -64,24 +54,23 @@ class Redemption(models.Model):
     aliffited_id = models.CharField(max_length=50, blank=True, null=True)
     status = models.CharField(
         max_length=10, 
-        choices=[('pending', 'Pending'), ('redeemed', 'Redeemed')], 
+        choices=[('pending', 'Pending'), ('redeemed', 'Redeemed')],
         default='pending'
     )
     redeemed_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
-    def __str__(self):
-        return f"{self.visitor} → {self.campaign.reward_name} ({self.status})"
-
     def save(self, *args, **kwargs):
         if self.status == 'redeemed' and not self.aliffited_id:
             last = Redemption.objects.filter(status='redeemed').order_by('-id').first()
+            num = 1
             if last and last.aliffited_id:
                 try:
                     num = int(last.aliffited_id.replace('ALFF', '')) + 1
                 except ValueError:
                     num = 1
-            else:
-                num = 1
             self.aliffited_id = f"ALFF{num:05d}"
         super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.visitor} → {self.campaign.reward_name} ({self.status})"

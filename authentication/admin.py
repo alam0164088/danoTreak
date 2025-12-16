@@ -179,3 +179,33 @@ class VendorProfileUpdateRequestAdmin(admin.ModelAdmin):
         )
     action_buttons.short_description = "Actions"
     action_buttons.allow_tags = True
+
+
+
+
+from django.contrib import admin
+from .models import FavoriteVendor
+
+@admin.register(FavoriteVendor)
+class FavoriteVendorAdmin(admin.ModelAdmin):
+    list_display = (
+        'id', 
+        'user', 
+        'get_vendor_name', 
+        'get_ai_vendor_name', 
+        'expiry_date', 
+        'created_at'
+    )
+    list_filter = ('user', 'vendor', 'expiry_date')
+    search_fields = ('user__email', 'vendor__shop_name', 'ai_vendor_data__shop_name', 'ai_vendor_id')
+    readonly_fields = ('created_at',)
+    
+    def get_vendor_name(self, obj):
+        return obj.vendor.shop_name if obj.vendor else "-"
+    get_vendor_name.short_description = "DB Vendor"
+
+    def get_ai_vendor_name(self, obj):
+        if obj.ai_vendor_data:
+            return obj.ai_vendor_data.get('shop_name', obj.ai_vendor_id or "AI Vendor")
+        return "-"
+    get_ai_vendor_name.short_description = "AI Vendor"
