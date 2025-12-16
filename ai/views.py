@@ -560,3 +560,89 @@ class MyFavoriteVendorsAPI(APIView):
             vendor_list.append(info)
 
         return Response({"success": True, "total_favorites_within_5km": len(vendor_list), "my_favorites": vendor_list})
+
+
+
+
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework.permissions import IsAuthenticated
+from django.utils import timezone
+from authentication.models import Vendor
+from vendor.models import Campaign
+import math
+
+# Haversine distance
+def calculate_distance(lat1, lon1, lat2, lon2):
+    R = 6371
+    lat1, lon1, lat2, lon2 = map(float, [lat1, lon1, lat2, lon2])
+    d_lat = math.radians(lat2 - lat1)
+    d_lon = math.radians(lon2 - lon1)
+    a = math.sin(d_lat/2)**2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(d_lon/2)**2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+    return R * c  # KM
+
+class NearbyCampaignVendorsAPI(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        profile = getattr(request.user, "profile", None)
+        if not profile or not profile.latitude or not profile.longitude:
+            return Response({"success": False, "message": "প্রোফাইলে লোকেশন নেই। আপডেট করো।"}, status=400)
+        
+        user_lat, user_lng = profile.latitude, profile.longitude
+        max_distance_km = 5  # প্রয়োজনমতো পরিবর্তন করা যাবে
+
+        # Active campaign vendors
+        vendors = Vendor.objects.filter(
+            campaigns__is_active=True,  # Campaign relation থেকে filter
+            latitude__isnull=False,
+            longitude__isnull=False
+        ).distinct()  # Duplicate vendors দূর করার জন্য
+
+        vendor_list = []
+
+        for v in vendors:
+            distance = calculate_distance(user_lat, user_lng, v.latitude, v.longitude)
+            if distance > max_distance_km:
+                continue
+
+            # Active campaigns নিয়ে আসা
+            active_campaigns = v.campaigns.filter(is_active=True)
+            campaigns_info = [
+                {
+                    "name": c.name,
+                    "reward_name": c.reward_name,
+                    "reward_description": c.reward_description,
+                    "required_visits": c.required_visits,
+                    "campaign_id": c.id
+                } for c in active_campaigns
+            ]
+
+            vendor_list.append({
+                "id": v.id,
+                "vendor_name": v.vendor_name or "N/A",
+                "shop_name": v.shop_name or "N/A",
+                "phone_number": v.phone_number or "N/A",
+                "email": v.user.email if hasattr(v, 'user') and v.user else "N/A",
+                "shop_address": v.shop_address or "N/A",
+                "category": v.category or "N/A",
+                "description": v.description or "",
+                "activities": v.activities or [],
+                "rating": float(v.rating) if v.rating else 0.0,
+                "review_count": v.review_count or 0,
+                "shop_images": v.shop_images or [],
+                "distance_km": round(distance, 2),
+                "location": {"latitude": v.latitude, "longitude": v.longitude},
+                "active_campaigns": campaigns_info
+            })
+
+        # Distance অনুযায়ী sort
+        vendor_list.sort(key=lambda x: x['distance_km'])
+
+        return Response({
+            "success": True,
+            "your_location": {"lat": user_lat, "lng": user_lng},
+            "total_vendors": len(vendor_list),
+            "vendors": vendor_list
+        })

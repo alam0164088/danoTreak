@@ -3,7 +3,7 @@ import websockets
 import json
 
 # =================== টোকেন ===================
-TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzk3MzcyODM3LCJpYXQiOjE3NjU4MzY4MzcsImp0aSI6IjA5MGYwYzhiZjJkZTRkZWE5ODlkNmQ3OWNmYzc5YjJhIiwidXNlcl9pZCI6IjEyOSJ9.H230s7ShvrXXEljkAnJULxC9wshCbsVD2kgQZk3L5mY" 
+TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzk3NDUzODU5LCJpYXQiOjE3NjU5MTc4NTksImp0aSI6IjY4YmEzMmZkMTI0NjQxYjE4Y2Q2ODIyNzg0YjY5NmZiIiwidXNlcl9pZCI6IjEyOCJ9.N7Rbl6TfTxPAbFepgbIN9FEQ2xH6OxBNrvkdrGOqPVA" 
 # =================== WebSocket URL ===================
 WS_URL = f"ws://127.0.0.1:8000/ws/location/?token={TOKEN}"
 
