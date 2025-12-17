@@ -17,16 +17,19 @@ class LiveLocationConsumer(AsyncWebsocketConsumer):
             await self.close()
             return
 
+        # Group names
         self.location_group_name = "live_location_group"
         self.online_group_name = "live_users"
 
+        # Add to groups
         await self.channel_layer.group_add(self.location_group_name, self.channel_name)
         await self.channel_layer.group_add(self.online_group_name, self.channel_name)
 
+        # Track online users
         ONLINE_USERS.add(self.user.id)
         await self.accept()
 
-        # প্রোফাইল থেকে প্রাথমিক লোকেশন নিয়ে আসা
+        # প্রোফাইল থেকে প্রাথমিক লোকেশন
         lat, lng = None, None
         try:
             profile = await database_sync_to_async(lambda: self.user.profile)()
@@ -49,14 +52,21 @@ class LiveLocationConsumer(AsyncWebsocketConsumer):
         await self.broadcast_online_users()
 
     async def disconnect(self, close_code):
-        await self.channel_layer.group_discard(self.location_group_name, self.channel_name)
-        await self.channel_layer.group_discard(self.online_group_name, self.channel_name)
-        if self.user and not self.user.is_anonymous:
+        # Safely discard from groups if attributes exist
+        if hasattr(self, 'location_group_name'):
+            await self.channel_layer.group_discard(self.location_group_name, self.channel_name)
+        if hasattr(self, 'online_group_name'):
+            await self.channel_layer.group_discard(self.online_group_name, self.channel_name)
+
+        # Remove from online list
+        if hasattr(self, 'user') and self.user and not self.user.is_anonymous:
             ONLINE_USERS.discard(self.user.id)
 
-        print(f"WS Disconnected: user_id={getattr(self.user, 'id', None)}, email={getattr(self.user, 'email', None)}")
+        print(f"WS Disconnected: user_id={getattr(self, 'user', None) and getattr(self.user, 'id', None)}, email={getattr(self, 'user', None) and getattr(self.user, 'email', None)}")
 
-        await self.broadcast_online_users()
+        # Broadcast online users safely
+        if hasattr(self, 'online_group_name'):
+            await self.broadcast_online_users()
 
     async def receive(self, text_data):
         try:
@@ -76,7 +86,7 @@ class LiveLocationConsumer(AsyncWebsocketConsumer):
 
             await self.update_user_location(lat, lng)
 
-            # গ্রুপে পাঠানো
+            # Broadcast location to group
             await self.channel_layer.group_send(
                 self.location_group_name,
                 {
@@ -123,13 +133,14 @@ class LiveLocationConsumer(AsyncWebsocketConsumer):
 
     async def broadcast_online_users(self):
         online_users_list = list(ONLINE_USERS)
-        await self.channel_layer.group_send(
-            self.online_group_name,
-            {
-                "type": "online_users_update",
-                "online_users": online_users_list
-            }
-        )
+        if hasattr(self, 'online_group_name'):
+            await self.channel_layer.group_send(
+                self.online_group_name,
+                {
+                    "type": "online_users_update",
+                    "online_users": online_users_list
+                }
+            )
 
     async def online_users_update(self, event):
         await self.send(json.dumps({
@@ -156,9 +167,6 @@ class LiveLocationConsumer(AsyncWebsocketConsumer):
         Δλ = radians(lon2 - lon1)
         a = sin(Δφ / 2)**2 + cos(φ1) * cos(φ2) * sin(Δλ / 2)**2
         return R * (2 * atan2(sqrt(a), sqrt(1 - a)))
-    
-
-
 
     def perform_auto_checkin(self, user, lat, lng):
         from vendor.models import Visitor, Visit, Campaign, Redemption
@@ -209,21 +217,19 @@ class LiveLocationConsumer(AsyncWebsocketConsumer):
         visitor.total_visits += 1
         visitor.save(update_fields=["total_visits"])
 
-        # Redemption & Notification logic (নতুন লজিক)
+        # Redemption & Notification logic
         rewards = []
         aliffited_ids = []
 
         active_campaigns = Campaign.objects.filter(vendor=matched_vendor, is_active=True)
 
         for campaign in active_campaigns:
-            # Visitor আগে এই Campaign Redeem করেছে কি না check
             existing_redemption = Redemption.objects.filter(visitor=visitor, campaign=campaign).first()
             if existing_redemption:
-                continue  # skip, পুরানো Campaign-এ Redeem হবে না
+                continue
 
-            # Visitor total_visits >= required_visits check
             if visitor.total_visits < campaign.required_visits:
-                continue  # visitor এখনো eligible নয়
+                continue
 
             redemption = Redemption.objects.create(
                 visitor=visitor,
@@ -235,17 +241,14 @@ class LiveLocationConsumer(AsyncWebsocketConsumer):
             rewards.append(campaign.reward_name)
             aliffited_ids.append(redemption.aliffited_id)
 
-            # Notification তৈরি
             Notification.objects.create(
                 user=user,
                 title="🎉 Redeem Unlocked!",
                 message="Congratulations! You unlocked a redeem reward.",
                 aliffited_id=redemption.aliffited_id,
-                shop_name=matched_vendor.shop_name,  # যদি মডেল ফিল্ডে যোগ করা থাকে
-                reward_name=campaign.reward_name      # যদি মডেল ফিল্ডে যোগ করা থাকে
+                shop_name=matched_vendor.shop_name,
+                reward_name=campaign.reward_name
             )
-
-
 
         return {
             "success": True,
