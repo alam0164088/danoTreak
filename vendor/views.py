@@ -194,4 +194,3 @@ def confirm_redemption(request, redemption_id):
         "status": "redeemed",
         "aliffited_id": redemption.aliffited_id
     })
-

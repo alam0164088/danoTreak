@@ -28,3 +28,7 @@ def generate_aliffited_id():
         else:
             num = 1
         return f"ALFF{num:05d}"
+    
+
+
+

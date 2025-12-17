@@ -309,3 +309,9 @@ class ReferralCodeSerializer(serializers.ModelSerializer):
     def get_referral_link(self, obj):
         base_url = getattr(settings, 'FRONTEND_URL', 'https://danotreak.com')
         return f"{base_url}/register?ref={obj.referral_code}"
+    
+
+
+
+
+

@@ -2092,7 +2092,28 @@ class AdminAllVendorCredentialsView(APIView):
             "total_vendors": len(credentials),
             "credentials": credentials
         })
- 
 
 
 
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework.permissions import IsAuthenticated
+from rest_framework import serializers
+from .models import Notification
+
+class NotificationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Notification
+        fields = ["id", "title", "message", "aliffited_id", "shop_name", "reward_name", "is_read", "created_at"]
+
+class NotificationListAPI(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        qs = Notification.objects.filter(user=request.user).order_by("-created_at")
+        serializer = NotificationSerializer(qs, many=True)
+        return Response({
+            "success": True,
+            "count": qs.count(),
+            "notifications": serializer.data
+        })
