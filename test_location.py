@@ -12,6 +12,8 @@ WS_URL = f"ws://127.0.0.1:8000/ws/location/?token={TOKEN}"
 LATITUDE = 23.810331
 LONGITUDE = 90.412518
 
+
+
 async def main():
     try:
         # WebSocket connect
@@ -44,13 +46,15 @@ async def main():
                     # Vendor distance info handle
                     if msg_type == "vendor_distance_info":
                         print("🎯 Vendor Distance Info:")
-                        for vendor in response_data["data"]:  # data is a list
+                        vendors = response_data["data"].get("vendors", [])  # data dict থেকে vendors list নাও
+                        for vendor in vendors:
                             print(f"- {vendor['vendor_name']} | {vendor['distance_m']}m | Active Campaign: {vendor['has_active_campaign']} | Matched: {vendor['matched']}")
                         # success/message info
-                        if any(v.get("matched") for v in response_data["data"]):
+                        if any(v.get("matched") for v in vendors):
                             print("✅ Auto Check-in: Already visited recently or reward unlocked")
                         else:
                             print("⚠️ Info: No nearby vendor matched")
+
 
                     else:
                         # অন্য response যেমন location.update, online_users_update

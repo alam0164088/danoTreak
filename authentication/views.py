@@ -148,44 +148,6 @@ class VendorSignUpView(APIView):
         }, status=status.HTTP_201_CREATED)
 
 
-# authentication/views.py এর শেষে যোগ করো
-# authentication/views.py
-from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import IsAuthenticated
-from rest_framework.response import Response
-from authentication.consumers import ONLINE_USERS
-from authentication.models import Profile  # user profile থেকে lat/lng আনব
-from datetime import datetime
-
-@api_view(['GET'])
-@permission_classes([IsAuthenticated])
-def live_users_view(request):
-    live_users_data = []
-
-    for user_id in ONLINE_USERS:
-        try:
-            profile = Profile.objects.get(user_id=user_id)
-            live_users_data.append({
-                "user_id": user_id,
-                "latitude": profile.latitude,
-                "longitude": profile.longitude,
-                "last_seen": profile.updated_at.strftime("%H:%M:%S") if hasattr(profile, "updated_at") else None
-            })
-        except Profile.DoesNotExist:
-            live_users_data.append({
-                "user_id": user_id,
-                "latitude": None,
-                "longitude": None,
-                "last_seen": None
-            })
-
-    return Response({
-        "success": True,
-        "total_online": len(ONLINE_USERS),
-        "live_users": live_users_data,
-        "timestamp": datetime.now().strftime("%H:%M:%S")
-    })
-
 
 
 class InitialAdminSignUpView(APIView):
@@ -2117,3 +2079,45 @@ class NotificationListAPI(APIView):
             "count": qs.count(),
             "notifications": serializer.data
         })
+
+
+
+
+# authentication/views.py
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from authentication.consumers import ONLINE_USERS
+from authentication.models import Profile
+from datetime import datetime
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def live_users_view(request):
+    live_users_data = []
+
+    for user_id in ONLINE_USERS:
+        try:
+            profile = Profile.objects.get(user_id=user_id)
+            live_users_data.append({
+                "user_id": user_id,
+                "email": profile.user.email,
+                "latitude": profile.latitude,
+                "longitude": profile.longitude,
+                "last_seen": profile.updated_at.strftime("%H:%M:%S") if hasattr(profile, "updated_at") else None
+            })
+        except Profile.DoesNotExist:
+            live_users_data.append({
+                "user_id": user_id,
+                "email": None,
+                "latitude": None,
+                "longitude": None,
+                "last_seen": None
+            })
+
+    return Response({
+        "success": True,
+        "total_online": len(ONLINE_USERS),
+        "live_users": live_users_data,
+        "timestamp": datetime.now().strftime("%H:%M:%S")
+    })
