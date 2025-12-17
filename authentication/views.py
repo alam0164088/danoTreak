@@ -1064,16 +1064,9 @@ class MyReferralCodeView(APIView):
 
 # ============================
 # VENDOR PROFILE COMPLETION
-# ============================
-# views.py → CompleteVendorProfileView (১০০% কাজ করা + এরর-ফ্রি)
-# ============================
-# VENDOR PROFILE COMPLETION (ফাইনাল ভার্সন - activities + images সব ঠিক!)
-# ============================
 import uuid
-import json
 import re
 from decimal import Decimal
-from django.conf import settings
 from django.core.files.storage import default_storage
 from django.core.exceptions import ObjectDoesNotExist
 from rest_framework.views import APIView
@@ -1081,9 +1074,6 @@ from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework import status
-
-# helper import
-# from .utils import update_vendor_rating  # যদি আগের মতো rating refresh করতে চাও
 
 
 class CompleteVendorProfileView(APIView):
@@ -1100,9 +1090,6 @@ class CompleteVendorProfileView(APIView):
         try:
             vendor = request.user.vendor_profile
 
-            # rating refresh (optional)
-            # update_vendor_rating(vendor)
-
             return Response({
                 "success": True,
                 "profile_complete": vendor.is_profile_complete,
@@ -1112,13 +1099,13 @@ class CompleteVendorProfileView(APIView):
                     "phone_number": vendor.phone_number or "",
                     "shop_address": vendor.shop_address or "",
                     "category": vendor.category or "",
-                    "latitude": str(vendor.latitude) if vendor.latitude else "",
-                    "longitude": str(vendor.longitude) if vendor.longitude else "",
+                    "latitude": float(vendor.latitude) if vendor.latitude else None,
+                    "longitude": float(vendor.longitude) if vendor.longitude else None,
                     "shop_images": vendor.shop_images or [],
                     "description": vendor.description or "",
                     "activities": vendor.activities or [],
-                    "rating": float(vendor.rating or 0),
-                    "review_count": vendor.review_count or 0,
+                    "rating": float(vendor.rating),
+                    "review_count": vendor.review_count,
                 }
             }, status=200)
 
@@ -1149,11 +1136,12 @@ class CompleteVendorProfileView(APIView):
         data = request.data
 
         # =========================
-        # REQUIRED BASIC FIELDS
+        # REQUIRED FIELDS
         # =========================
-        required = ["vendor_name", "shop_name", "phone_number",
-                    "shop_address", "category", "latitude", "longitude"]
-
+        required = [
+            "vendor_name", "shop_name", "phone_number",
+            "shop_address", "category", "latitude", "longitude"
+        ]
         missing = [f for f in required if not data.get(f)]
         if missing:
             return Response({
@@ -1162,13 +1150,17 @@ class CompleteVendorProfileView(APIView):
             }, status=400)
 
         # =========================
-        # PHONE
+        # PHONE VALIDATION
         # =========================
         phone = str(data["phone_number"]).strip()
         if phone.startswith("+880"):
             phone = "0" + phone[4:]
+
         if not re.match(r"^01[3-9]\d{8}$", phone):
-            return Response({"success": False, "message": "সঠিক মোবাইল নম্বর দিন"}, status=400)
+            return Response(
+                {"success": False, "message": "সঠিক মোবাইল নম্বর দিন"},
+                status=400
+            )
 
         # =========================
         # LAT / LNG
@@ -1177,47 +1169,34 @@ class CompleteVendorProfileView(APIView):
             lat = Decimal(str(data["latitude"]))
             lng = Decimal(str(data["longitude"]))
         except:
-            return Response({"success": False, "message": "ল্যাটিটিউড ও লংগিটিউড সঠিক দিন"}, status=400)
+            return Response(
+                {"success": False, "message": "ল্যাটিটিউড ও লংগিটিউড সঠিক দিন"},
+                status=400
+            )
 
         # =========================
-        # RATING & REVIEW COUNT
-        # =========================
-        rating = vendor.rating
-        review_count = vendor.review_count
-
-        if "rating" in data:
-            try:
-                rating = float(data["rating"])
-                if rating < 0 or rating > 5:
-                    return Response(
-                        {"success": False, "message": "rating 0 থেকে 5 এর মধ্যে হতে হবে"},
-                        status=400
-                    )
-            except:
-                return Response({"success": False, "message": "rating সংখ্যা হতে হবে"}, status=400)
-
-        if "review_count" in data:
-            try:
-                review_count = int(data["review_count"])
-                if review_count < 0:
-                    return Response(
-                        {"success": False, "message": "review_count নেগেটিভ হতে পারে না"},
-                        status=400
-                    )
-            except:
-                return Response({"success": False, "message": "review_count সংখ্যা হতে হবে"}, status=400)
-
-        # =========================
-        # ACTIVITIES FIX
+        # ACTIVITIES
         # =========================
         activities = vendor.activities or []
         if "activities" in data:
             acts = data.get("activities")
             if isinstance(acts, str):
-                # "football,game , sleep" => ["football","game","sleep"]
                 activities = [a.strip() for a in acts.split(",") if a.strip()]
             elif isinstance(acts, list):
                 activities = [str(a).strip() for a in acts if str(a).strip()]
+
+        # =========================
+        # SHOP IMAGES (MULTIPLE)
+        # =========================
+        images = request.FILES.getlist("shop_images")
+        shop_images = vendor.shop_images or []
+
+        if images:
+            for img in images:
+                ext = img.name.split(".")[-1]
+                filename = f"vendors/{vendor.user.id}/{uuid.uuid4().hex}.{ext}"
+                path = default_storage.save(filename, img)
+                shop_images.append(default_storage.url(path))
 
         # =========================
         # SAVE
@@ -1231,9 +1210,7 @@ class CompleteVendorProfileView(APIView):
         vendor.longitude = lng
         vendor.description = data.get("description", "")
         vendor.activities = activities
-        vendor.shop_images = vendor.shop_images or []
-        vendor.rating = rating
-        vendor.review_count = review_count
+        vendor.shop_images = shop_images
         vendor.is_profile_complete = True
         vendor.save()
 
@@ -1247,13 +1224,13 @@ class CompleteVendorProfileView(APIView):
                 "phone_number": vendor.phone_number,
                 "shop_address": vendor.shop_address,
                 "category": vendor.category,
-                "latitude": str(vendor.latitude),
-                "longitude": str(vendor.longitude),
+                "latitude": float(vendor.latitude),
+                "longitude": float(vendor.longitude),
                 "shop_images": vendor.shop_images,
                 "description": vendor.description,
                 "activities": vendor.activities,
-                "rating": vendor.rating,
-                "review_count": vendor.review_count
+                "rating": float(vendor.rating),
+                "review_count": vendor.review_count,
             }
         }, status=200)
 
