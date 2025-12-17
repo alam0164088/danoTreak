@@ -3,13 +3,23 @@ import websockets
 import json
 
 # =================== টোকেন ===================
-TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzk3NDUzODU5LCJpYXQiOjE3NjU5MTc4NTksImp0aSI6IjY4YmEzMmZkMTI0NjQxYjE4Y2Q2ODIyNzg0YjY5NmZiIiwidXNlcl9pZCI6IjEyOCJ9.N7Rbl6TfTxPAbFepgbIN9FEQ2xH6OxBNrvkdrGOqPVA" 
+TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzk3NTM1MTQyLCJpYXQiOjE3NjU5OTkxNDIsImp0aSI6ImMyZDc0N2UyN2Q4NTQzMjNiY2JlMGNjMDM2MDRlMTRhIiwidXNlcl9pZCI6IjE0MiJ9.QfG-AzW8pMh3Qx5mn3CIuqg9kX3Geamw8LVAjgCbFs8"
+
 # =================== WebSocket URL ===================
 WS_URL = f"ws://127.0.0.1:8000/ws/location/?token={TOKEN}"
 
+# =================== লোকেশন ===================
+LATITUDE = 23.810331
+LONGITUDE = 90.412518
+
 async def main():
     try:
-        async with websockets.connect(WS_URL) as ws:
+        # WebSocket connect
+        async with websockets.connect(
+            WS_URL,
+            ping_interval=10,  # ping প্রতি ১০ সেকেন্ডে
+            ping_timeout=20    # timeout ২০ সেকেন্ড
+        ) as ws:
             print("✅ Connected to WebSocket server")
 
             while True:
@@ -17,8 +27,8 @@ async def main():
                 payload = {
                     "type": "location.update",
                     "data": {
-                        "latitude": 23.810331,
-                        "longitude": 90.412518
+                        "latitude": LATITUDE,
+                        "longitude": LONGITUDE
                     }
                 }
                 await ws.send(json.dumps(payload))
@@ -26,33 +36,40 @@ async def main():
 
                 # ------------------- রেসপন্স চেক করা -------------------
                 try:
-                    response = await asyncio.wait_for(ws.recv(), timeout=2)
+                    response = await asyncio.wait_for(ws.recv(), timeout=5)  # ৫ সেকেন্ড timeout
                     response_data = json.loads(response)
 
                     msg_type = response_data.get("type")
 
+                    # Vendor distance info handle
                     if msg_type == "vendor_distance_info":
                         print("🎯 Vendor Distance Info:")
-                        for vendor in response_data["data"]["vendors"]:
+                        for vendor in response_data["data"]:  # data is a list
                             print(f"- {vendor['vendor_name']} | {vendor['distance_m']}m | Active Campaign: {vendor['has_active_campaign']} | Matched: {vendor['matched']}")
-                        if response_data["data"].get("success"):
-                            print("✅ Auto Check-in:", response_data["data"].get("message"))
+                        # success/message info
+                        if any(v.get("matched") for v in response_data["data"]):
+                            print("✅ Auto Check-in: Already visited recently or reward unlocked")
                         else:
-                            print("⚠️ Info:", response_data["data"].get("message"))
+                            print("⚠️ Info: No nearby vendor matched")
 
                     else:
                         # অন্য response যেমন location.update, online_users_update
                         print("Response:", json.dumps(response_data, indent=4))
 
                 except asyncio.TimeoutError:
-                    # যদি কোনো রেসপন্স না আসে, শুধু পাশ করো
+                    # যদি response না আসে, শুধু skip করো
                     pass
+                except Exception as e:
+                    print("❌ Error processing response:", e)
 
                 # প্রতি ৫ সেকেন্ডে আপডেট
                 await asyncio.sleep(5)
 
+    except websockets.ConnectionClosed as e:
+        print("❌ WebSocket closed:", e)
     except Exception as e:
         print("❌ Error:", e)
 
 # =================== স্ক্রিপ্ট রান ===================
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())

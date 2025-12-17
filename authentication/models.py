@@ -1,5 +1,6 @@
 
 #  authetication/models
+from django.conf import settings
 from django.db import models
 from django.contrib.auth.models import AbstractUser
 from django.utils.translation import gettext_lazy as _
@@ -332,3 +333,21 @@ class EmailOTP(models.Model):
 
     def __str__(self):
         return f"OTP for {self.email}"
+    
+
+
+
+class Notification(models.Model):
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="notifications"
+    )
+    title = models.CharField(max_length=255)
+    message = models.TextField()
+    aliffited_id = models.CharField(max_length=20, null=True, blank=True)
+    shop_name = models.CharField(max_length=255, null=True, blank=True)   # নতুন ফিল্ড
+    reward_name = models.CharField(max_length=255, null=True, blank=True) # নতুন ফিল্ড
+    is_read = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
