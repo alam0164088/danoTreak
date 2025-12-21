@@ -13,8 +13,6 @@ from authentication.models import Vendor
 from .models import Campaign, Visitor, Visit, Redemption
 from .utils import generate_aliffited_id
 
-
-
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def dashboard_overview(request):
@@ -24,28 +22,28 @@ def dashboard_overview(request):
 
     total_visitor = Visitor.objects.filter(vendor=vendor).count()
 
-    active_campaign = Campaign.objects.filter(
-        vendor=vendor, is_active=True
-    ).count()
+    active_campaign = Campaign.objects.filter(vendor=vendor, is_active=True).count()
+    deactivate_campaign = Campaign.objects.filter(vendor=vendor, is_active=False).count()
 
-    deactivate_campaign = Campaign.objects.filter(
-        vendor=vendor, is_active=False
-    ).count()
-
-    # ✅ Eligible for reward (visit completed, reward not taken)
-    eligible_for_reward = Redemption.objects.filter(
+    # Pending reward (eligible, not yet redeemed)
+    pending_rewards = Redemption.objects.filter(
         campaign__vendor=vendor,
-        campaign__is_active=True,
         status='pending'
+    ).count()
+
+    # Redeemed rewards
+    redeemed_rewards = Redemption.objects.filter(
+        campaign__vendor=vendor,
+        status='redeemed'
     ).count()
 
     return Response({
         "total_visitor": total_visitor,
         "active_campaign": active_campaign,
         "deactivate_campaign": deactivate_campaign,
-        "eligible_for_reward": eligible_for_reward
+        "pending_rewards": pending_rewards,
+        "redeemed_rewards": redeemed_rewards
     })
-
 
 
 
@@ -59,9 +57,44 @@ def user_management(request):
 
     visitors = Visitor.objects.filter(vendor=vendor).order_by(
         '-total_visits', '-created_at'
-    ).values('id', 'name', 'phone', 'total_visits', 'is_blocked')
+    )
 
-    return Response({"visitors": list(visitors)})
+    data = []
+    for visitor in visitors:
+        # visitor-এর জন্য active campaign
+        active_campaigns = Campaign.objects.filter(vendor=vendor, is_active=True)
+        campaigns_list = []
+
+        for campaign in active_campaigns:
+            # Redemption check
+            redemption = Redemption.objects.filter(visitor=visitor, campaign=campaign).first()
+            if redemption:
+                status = redemption.status
+            else:
+                # যদি Redeem entry না থাকে এবং visitor required_visits পূর্ণ করে
+                if visitor.total_visits >= campaign.required_visits:
+                    status = 'pending'
+                else:
+                    status = 'not_eligible'
+
+            campaigns_list.append({
+                "campaign_id": campaign.id,
+                "campaign_name": campaign.name,
+                "reward_name": campaign.reward_name,
+                "status": status
+            })
+
+        data.append({
+            "visitor_id": visitor.id,
+            "visitor_name": visitor.name,
+            "visitor_phone": visitor.phone,
+            "total_visits": visitor.total_visits,
+            "is_blocked": visitor.is_blocked,
+            "campaigns": campaigns_list
+        })
+
+    return Response({"visitors": data})
+
 
 
 @api_view(['GET'])
