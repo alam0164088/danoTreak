@@ -15,10 +15,6 @@ from .utils import generate_aliffited_id
 
 
 
-
-
-
-
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def dashboard_overview(request):
@@ -26,23 +22,32 @@ def dashboard_overview(request):
     if not vendor:
         return Response({"error": "Vendor profile not found"}, status=403)
 
+    total_visitor = Visitor.objects.filter(vendor=vendor).count()
+
+    active_campaign = Campaign.objects.filter(
+        vendor=vendor, is_active=True
+    ).count()
+
+    deactivate_campaign = Campaign.objects.filter(
+        vendor=vendor, is_active=False
+    ).count()
+
+    # ✅ Eligible for reward (visit completed, reward not taken)
+    eligible_for_reward = Redemption.objects.filter(
+        campaign__vendor=vendor,
+        campaign__is_active=True,
+        status='pending'
+    ).count()
+
     return Response({
-        "total_visitor": Visitor.objects.filter(vendor=vendor).count(),
-        "active_campaign": Campaign.objects.filter(vendor=vendor, is_active=True).count(),
-        "reward_redemptions": Redemption.objects.filter(
-            campaign__vendor=vendor,
-            status='redeemed'
-        ).count(),
-        "recent_visitors": list(
-            Visitor.objects.filter(vendor=vendor)
-            .order_by('-created_at')[:10]
-            .values('name', 'phone', 'total_visits')
-        ),
-        "available_campaign": list(
-            Campaign.objects.filter(vendor=vendor, is_active=True)
-            .values('id', 'name', 'reward_name', 'required_visits')
-        )
+        "total_visitor": total_visitor,
+        "active_campaign": active_campaign,
+        "deactivate_campaign": deactivate_campaign,
+        "eligible_for_reward": eligible_for_reward
     })
+
+
+
 
 
 @api_view(['GET'])
@@ -105,6 +110,38 @@ def redeem_history(request):
     return Response({"history": list(history)})
 
 
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def toggle_redemption_status(request, redemption_id):
+    vendor = getattr(request.user, "vendor_profile", None)
+    if not vendor:
+        return Response({"error": "Vendor profile not found"}, status=403)
+
+    redemption = get_object_or_404(
+        Redemption,
+        id=redemption_id,
+        campaign__vendor=vendor
+    )
+
+    # টোগল logic
+    if redemption.status == 'pending':
+        redemption.status = 'redeemed'
+        redemption.redeemed_at = timezone.now()
+    else:
+        redemption.status = 'pending'
+        redemption.redeemed_at = None
+
+    redemption.save()
+
+    return Response({
+        "id": redemption.id,
+        "visitor_name": redemption.visitor.name,
+        "campaign_name": redemption.campaign.name,
+        "status": redemption.status,
+        "redeemed_at": redemption.redeemed_at
+    })
+
+
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
@@ -126,6 +163,24 @@ def create_campaign(request):
         {"message": "Campaign created", "id": campaign.id},
         status=status.HTTP_201_CREATED
     )
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def toggle_campaign_status(request, campaign_id):
+    vendor = getattr(request.user, "vendor_profile", None)
+    if not vendor:
+        return Response({"error": "Vendor profile not found"}, status=403)
+
+    campaign = get_object_or_404(Campaign, id=campaign_id, vendor=vendor)
+
+    campaign.is_active = not campaign.is_active
+    campaign.save()
+
+    return Response({
+        "message": "Campaign status updated",
+        "is_active": campaign.is_active
+    })
+
 
 @api_view(['PUT'])
 @permission_classes([IsAuthenticated])
