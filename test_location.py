@@ -3,7 +3,7 @@ import websockets
 import json
 
 # =================== টোকেন ===================
-TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzk3ODg1NjYzLCJpYXQiOjE3NjYzNDk2NjMsImp0aSI6IjhlZTk1NDdmZjA0YjRkYWJiYWZmMzMzOWZjOWJkZWQwIiwidXNlcl9pZCI6IjE0OCJ9.XJlnp3wTxl0zsWpkyb31uNJEY3_o6eF7Wwvj1mdti8A"
+TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzk4MDU4NTY5LCJpYXQiOjE3NjY1MjI1NjksImp0aSI6IjJhMGE0OGFiOTFjZTRmOTk4MTkyNWIwZDVhMzJjYThjIiwidXNlcl9pZCI6IjE1MSJ9.95DemLpgEl_6um4vVPKhwPxf1oxBCJ49z-v6aOBb8RY"
 
 
 # =================== WebSocket URL ===================
