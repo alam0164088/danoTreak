@@ -336,7 +336,7 @@ class EmailOTP(models.Model):
     
 
 
-
+# authentication/models.py এর শেষে যোগ করো
 class Notification(models.Model):
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,

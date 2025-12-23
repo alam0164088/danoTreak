@@ -15,6 +15,14 @@ urlpatterns = [
     path('redeem/<int:redemption_id>/toggle/', views.toggle_redemption_status),
 
     path('block/<int:visitor_id>/', views.block_visitor),
+
+   
+    path('dashboard/stats/', views.DashboardStatsView.as_view(), name='dashboard-stats'),
+    path('users-vendors/list/', views.UserAndVendorListView.as_view(), name='users_vendors_list'),
+    path('campaign-redemption-report/', views.CampaignRedemptionReportView.as_view(), name='campaign_redemption_report'),
+    
+    
+
 ]
 
 # local import
