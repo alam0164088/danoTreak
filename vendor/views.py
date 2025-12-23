@@ -319,16 +319,14 @@ class DashboardStatsView(APIView):
         return Response(data, status=200)
     
 
-
-# vendor/views.py (শেষের অংশ আপডেট করা)
+# vendor/views.py (শেষের অংশ আপডেট)
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from authentication.permissions import IsAdmin
 from authentication.models import User, Vendor
 from .models import Campaign, Redemption, Visitor, Visit
-from django.db.models import Q, Count
+from django.db.models import Q
 
 class UserAndVendorListView(APIView):
     permission_classes = [IsAuthenticated, IsAdmin]
@@ -336,7 +334,9 @@ class UserAndVendorListView(APIView):
     def get(self, request):
         search = request.query_params.get('search', '').strip()
 
-        # ইউজার কোয়েরি (আগের মতোই)
+        # -------------------------
+        # USERS QUERY
+        # -------------------------
         users_qs = User.objects.filter(role='user')
         if search:
             users_qs = users_qs.filter(
@@ -348,7 +348,9 @@ class UserAndVendorListView(APIView):
 
         user_ids = [u['id'] for u in users]
 
-        # ভিজিট + রিডিম ম্যাপ (আগের মতোই)
+        # -------------------------
+        # VISITS MAPPING
+        # -------------------------
         visits = Visit.objects.filter(visitor__user__id__in=user_ids)
         visits_count_map = {}
         visited_vendors_map = {}
@@ -363,6 +365,9 @@ class UserAndVendorListView(APIView):
             if v.vendor and v.vendor.id:
                 visited_vendors_map[uid].add(v.vendor.id)
 
+        # -------------------------
+        # REDEMPTIONS (ALFF IDs)
+        # -------------------------
         redemptions = Redemption.objects.filter(visitor__user__id__in=user_ids, status='redeemed')
         aliffited_map = {}
         for r in redemptions:
@@ -371,15 +376,18 @@ class UserAndVendorListView(APIView):
             uid = r.visitor.user.id
             if uid not in aliffited_map:
                 aliffited_map[uid] = []
-            aliffited_map[uid].append(r.aliffited_id or "Pending")
+            if r.aliffited_id:  # শুধুমাত্র জেনারেট হওয়া ALFF আইডি
+                aliffited_map[uid].append(r.aliffited_id)
 
-        # ইউজার ডাটা
+        # -------------------------
+        # USER DATA
+        # -------------------------
         user_data = []
         for u in users:
             uid = u['id']
             visited_vendors = visited_vendors_map.get(uid, set())
             active_campaigns = Campaign.objects.filter(
-                vendor_id__in=visited_vendors,
+                vendor__id__in=visited_vendors,
                 is_active=True
             ).values('id', 'name', 'reward_name', 'required_visits')
 
@@ -392,13 +400,13 @@ class UserAndVendorListView(APIView):
             })
 
         # -------------------------
-        # ভেন্ডর ডাটা (নতুন ফিল্ড যোগ করা)
+        # VENDORS DATA
         # -------------------------
         vendors_qs = Vendor.objects.select_related('user')
         if search:
             vendors_qs = vendors_qs.filter(
-                Q(user__email__icontains=search) | 
-                Q(shop_name__icontains=search) | 
+                Q(user__email__icontains=search) |
+                Q(shop_name__icontains=search) |
                 Q(vendor_name__icontains=search)
             )
         vendors = vendors_qs.values(
@@ -408,21 +416,15 @@ class UserAndVendorListView(APIView):
             'vendor_name',
             'phone_number',
             'is_profile_complete',
-            'category'  # ← ক্যাটাগরি ফিল্ড যোগ করা হয়েছে (যদি তোমার মডেলে থাকে)
         )
 
         vendor_data = []
         for v in vendors:
             vendor_user_id = v['user__id']
-
-            # এই ভেন্ডরে কতবার ভিজিট হয়েছে (সব ইউজার মিলিয়ে)
-            total_visits = Visit.objects.filter(vendor__user_id=vendor_user_id).count()
-
-            # এই ভেন্ডরের কোনো একটিভ ক্যাম্পেইন আছে কি না
-            has_active_campaign = Campaign.objects.filter(
-                vendor__user_id=vendor_user_id,
-                is_active=True
-            ).exists()
+            # ভিজিট সংখ্যা
+            total_visits = Visit.objects.filter(vendor__id=vendor_user_id).count()
+            # একটিভ ক্যাম্পেইন আছে কি না
+            has_active_campaign = Campaign.objects.filter(vendor__id=vendor_user_id, is_active=True).exists()
 
             vendor_data.append({
                 "user_id": v['user__id'],
@@ -431,13 +433,12 @@ class UserAndVendorListView(APIView):
                 "vendor_name": v['vendor_name'] or "N/A",
                 "phone": v['phone_number'] or "N/A",
                 "profile_complete": v['is_profile_complete'],
-                "category": v.get('category', 'N/A'),  # ← ক্যাটাগরি
-                "has_active_campaign": "Yes" if has_active_campaign else "No",  # ← Yes/No
-                "total_visits": total_visits  # ← এই দোকানে কতবার ভিজিট হয়েছে
+                "has_active_campaign": "Yes" if has_active_campaign else "No",
+                "total_visits": total_visits
             })
 
         # -------------------------
-        # ফাইনাল রেসপন্স
+        # FINAL RESPONSE
         # -------------------------
         data = {
             "total_users": len(user_data),
@@ -447,6 +448,7 @@ class UserAndVendorListView(APIView):
         }
 
         return Response(data, status=200)
+
     
 
 
