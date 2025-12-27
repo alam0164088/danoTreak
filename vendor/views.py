@@ -13,6 +13,7 @@ from authentication.models import Vendor
 from .models import Campaign, Visitor, Visit, Redemption
 from .utils import generate_aliffited_id
 
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def dashboard_overview(request):
@@ -20,30 +21,18 @@ def dashboard_overview(request):
     if not vendor:
         return Response({"error": "Vendor profile not found"}, status=403)
 
-    total_visitor = Visitor.objects.filter(vendor=vendor).count()
-
-    active_campaign = Campaign.objects.filter(vendor=vendor, is_active=True).count()
-    deactivate_campaign = Campaign.objects.filter(vendor=vendor, is_active=False).count()
-
-    # Pending reward (eligible, not yet redeemed)
-    pending_rewards = Redemption.objects.filter(
-        campaign__vendor=vendor,
-        status='pending'
-    ).count()
-
-    # Redeemed rewards
-    redeemed_rewards = Redemption.objects.filter(
-        campaign__vendor=vendor,
-        status='redeemed'
-    ).count()
-
     return Response({
-        "total_visitor": total_visitor,
-        "active_campaign": active_campaign,
-        "deactivate_campaign": deactivate_campaign,
-        "pending_rewards": pending_rewards,
-        "redeemed_rewards": redeemed_rewards
+        "total_visitor": Visitor.objects.filter(vendor=vendor).count(),
+        "active_campaign": Campaign.objects.filter(vendor=vendor, is_active=True).count(),
+        "deactivate_campaign": Campaign.objects.filter(vendor=vendor, is_active=False).count(),
+        "pending_rewards": Redemption.objects.filter(
+            campaign__vendor=vendor, status='pending'
+        ).count(),
+        "redeemed_rewards": Redemption.objects.filter(
+            campaign__vendor=vendor, status='redeemed'
+        ).count()
     })
+
 
 
 
@@ -59,41 +48,47 @@ def user_management(request):
         '-total_visits', '-created_at'
     )
 
-    data = []
+    response = []
+
     for visitor in visitors:
-        # visitor-এর জন্য active campaign
-        active_campaigns = Campaign.objects.filter(vendor=vendor, is_active=True)
-        campaigns_list = []
+        campaigns_data = []
+        campaigns = Campaign.objects.filter(vendor=vendor, is_active=True)
 
-        for campaign in active_campaigns:
-            # Redemption check
-            redemption = Redemption.objects.filter(visitor=visitor, campaign=campaign).first()
-            if redemption:
-                status = redemption.status
-            else:
-                # যদি Redeem entry না থাকে এবং visitor required_visits পূর্ণ করে
-                if visitor.total_visits >= campaign.required_visits:
-                    status = 'pending'
-                else:
-                    status = 'not_eligible'
+        for campaign in campaigns:
+            redemption = Redemption.objects.filter(
+                visitor=visitor,
+                campaign=campaign
+            ).first()
 
-            campaigns_list.append({
+            # 🔥 REQUIRED VISITS পূর্ণ হলে pending create
+            if not redemption and visitor.total_visits >= campaign.required_visits:
+                redemption = Redemption.objects.create(
+                    visitor=visitor,
+                    campaign=campaign,
+                    status='pending'
+                )
+
+            status = redemption.status if redemption else 'not_eligible'
+
+            campaigns_data.append({
                 "campaign_id": campaign.id,
                 "campaign_name": campaign.name,
                 "reward_name": campaign.reward_name,
-                "status": status
+                "status": status,
+                "aliffited_id": redemption.aliffited_id if redemption else None
             })
 
-        data.append({
+        response.append({
             "visitor_id": visitor.id,
             "visitor_name": visitor.name,
             "visitor_phone": visitor.phone,
             "total_visits": visitor.total_visits,
             "is_blocked": visitor.is_blocked,
-            "campaigns": campaigns_list
+            "campaigns": campaigns_data
         })
 
-    return Response({"visitors": data})
+    return Response({"visitors": response})
+
 
 
 
@@ -118,7 +113,6 @@ def campaign_list(request):
     return Response({"campaigns": list(campaigns)})
 
 
-
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def redeem_history(request):
@@ -132,7 +126,6 @@ def redeem_history(request):
         'id',
         'visitor__name',
         'visitor__phone',
-        'visitor__total_visits',
         'campaign__name',
         'campaign__reward_name',
         'status',
@@ -143,12 +136,16 @@ def redeem_history(request):
     return Response({"history": list(history)})
 
 
+
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
-def toggle_redemption_status(request, redemption_id):
+def redeem_once(request, redemption_id):
     vendor = getattr(request.user, "vendor_profile", None)
     if not vendor:
-        return Response({"error": "Vendor profile not found"}, status=403)
+        return Response(
+            {"error": "Vendor profile not found"},
+            status=status.HTTP_403_FORBIDDEN
+        )
 
     redemption = get_object_or_404(
         Redemption,
@@ -156,14 +153,14 @@ def toggle_redemption_status(request, redemption_id):
         campaign__vendor=vendor
     )
 
-    # টোগল logic
-    if redemption.status == 'pending':
-        redemption.status = 'redeemed'
-        redemption.redeemed_at = timezone.now()
-    else:
-        redemption.status = 'pending'
-        redemption.redeemed_at = None
+    if redemption.status == 'redeemed':
+        return Response(
+            {"error": "Reward already redeemed"},
+            status=status.HTTP_400_BAD_REQUEST
+        )
 
+    redemption.status = 'redeemed'
+    redemption.redeemed_at = timezone.now()
     redemption.save()
 
     return Response({
@@ -171,10 +168,9 @@ def toggle_redemption_status(request, redemption_id):
         "visitor_name": redemption.visitor.name,
         "campaign_name": redemption.campaign.name,
         "status": redemption.status,
+        "aliffited_id": redemption.aliffited_id,
         "redeemed_at": redemption.redeemed_at
-    })
-
-
+    }, status=status.HTTP_200_OK)
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
@@ -319,7 +315,6 @@ class DashboardStatsView(APIView):
         return Response(data, status=200)
     
 
-# vendor/views.py (শেষের অংশ আপডেট)
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
@@ -328,68 +323,85 @@ from authentication.models import User, Vendor
 from .models import Campaign, Redemption, Visitor, Visit
 from django.db.models import Q
 
+
 class UserAndVendorListView(APIView):
     permission_classes = [IsAuthenticated, IsAdmin]
 
     def get(self, request):
         search = request.query_params.get('search', '').strip()
 
-        # -------------------------
+        # =========================
         # USERS QUERY
-        # -------------------------
+        # =========================
         users_qs = User.objects.filter(role='user')
         if search:
             users_qs = users_qs.filter(
-                Q(email__icontains=search) | Q(full_name__icontains=search)
+                Q(email__icontains=search) |
+                Q(full_name__icontains=search)
             )
+
         users = users_qs.values(
-            'id', 'email', 'full_name', 'role', 'is_active', 'created_at'
+            'id', 'email', 'full_name',
+            'role', 'is_active', 'created_at'
         ).order_by('-created_at')
 
         user_ids = [u['id'] for u in users]
 
-        # -------------------------
+        # =========================
         # VISITS MAPPING
-        # -------------------------
+        # =========================
         visits = Visit.objects.filter(visitor__user__id__in=user_ids)
+
         visits_count_map = {}
         visited_vendors_map = {}
 
-        for v in visits:
-            if not v.visitor or not v.visitor.user:
+        for visit in visits:
+            if not visit.visitor or not visit.visitor.user:
                 continue
-            uid = v.visitor.user.id
+
+            uid = visit.visitor.user.id
             visits_count_map[uid] = visits_count_map.get(uid, 0) + 1
+
             if uid not in visited_vendors_map:
                 visited_vendors_map[uid] = set()
-            if v.vendor and v.vendor.id:
-                visited_vendors_map[uid].add(v.vendor.id)
 
-        # -------------------------
+            if visit.vendor:
+                visited_vendors_map[uid].add(visit.vendor.id)
+
+        # =========================
         # REDEMPTIONS (ALFF IDs)
-        # -------------------------
-        redemptions = Redemption.objects.filter(visitor__user__id__in=user_ids, status='redeemed')
+        # =========================
+        redemptions = Redemption.objects.filter(
+            visitor__user__id__in=user_ids,
+            status='redeemed'
+        )
+
         aliffited_map = {}
         for r in redemptions:
             if not r.visitor or not r.visitor.user:
                 continue
+
             uid = r.visitor.user.id
-            if uid not in aliffited_map:
-                aliffited_map[uid] = []
-            if r.aliffited_id:  # শুধুমাত্র জেনারেট হওয়া ALFF আইডি
+            aliffited_map.setdefault(uid, [])
+
+            if r.aliffited_id:
                 aliffited_map[uid].append(r.aliffited_id)
 
-        # -------------------------
+        # =========================
         # USER DATA
-        # -------------------------
+        # =========================
         user_data = []
         for u in users:
             uid = u['id']
             visited_vendors = visited_vendors_map.get(uid, set())
-            active_campaigns = Campaign.objects.filter(
-                vendor__id__in=visited_vendors,
+
+            active_campaigns = Campaign.objects.filter(vendor__id__in=visited_vendors,
                 is_active=True
-            ).values('id', 'name', 'reward_name', 'required_visits')
+            ).values_list('name', flat=True)
+
+
+
+            
 
             user_data.append({
                 **u,
@@ -399,9 +411,9 @@ class UserAndVendorListView(APIView):
                 "total_aliffited_ids": len(aliffited_map.get(uid, []))
             })
 
-        # -------------------------
-        # VENDORS DATA
-        # -------------------------
+        # =========================
+        # VENDORS QUERY
+        # =========================
         vendors_qs = Vendor.objects.select_related('user')
         if search:
             vendors_qs = vendors_qs.filter(
@@ -409,7 +421,9 @@ class UserAndVendorListView(APIView):
                 Q(shop_name__icontains=search) |
                 Q(vendor_name__icontains=search)
             )
+
         vendors = vendors_qs.values(
+            'id',                # ✅ Vendor ID
             'user__id',
             'user__email',
             'shop_name',
@@ -418,13 +432,21 @@ class UserAndVendorListView(APIView):
             'is_profile_complete',
         )
 
+        # =========================
+        # VENDOR DATA (FIXED)
+        # =========================
         vendor_data = []
         for v in vendors:
-            vendor_user_id = v['user__id']
-            # ভিজিট সংখ্যা
-            total_visits = Visit.objects.filter(vendor__id=vendor_user_id).count()
-            # একটিভ ক্যাম্পেইন আছে কি না
-            has_active_campaign = Campaign.objects.filter(vendor__id=vendor_user_id, is_active=True).exists()
+            vendor_id = v['id']   # ✅ CORRECT ID
+
+            total_visits = Visit.objects.filter(
+                vendor__id=vendor_id
+            ).count()
+
+            has_active_campaign = Campaign.objects.filter(
+                vendor__id=vendor_id,
+                is_active=True
+            ).exists()
 
             vendor_data.append({
                 "user_id": v['user__id'],
@@ -437,17 +459,16 @@ class UserAndVendorListView(APIView):
                 "total_visits": total_visits
             })
 
-        # -------------------------
+        # =========================
         # FINAL RESPONSE
-        # -------------------------
-        data = {
+        # =========================
+        return Response({
             "total_users": len(user_data),
             "users": user_data,
             "total_vendors": len(vendor_data),
             "vendors": vendor_data
-        }
+        }, status=200)
 
-        return Response(data, status=200)
 
     
 

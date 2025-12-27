@@ -1466,7 +1466,7 @@ class AdminPendingVendorUpdateRequestsView(APIView):
         if request.user.role != 'admin':
             return Response({
                 "success": False,
-                "message": "শুধুমাত্র এডমিন এই তথ্য দেখতে পারবেন"
+                "message": "Only admins can view this information"
             }, status=403)
 
         # শুধু পেন্ডিং রিকোয়েস্ট
@@ -1486,15 +1486,15 @@ class AdminPendingVendorUpdateRequestsView(APIView):
 
             # ফিল্ড ম্যাপিং: (বাংলা নাম, পুরানো ভ্যালু)
             field_mapping = {
-                'vendor_name': ('ভেন্ডরের নাম', vendor.vendor_name or "খালি"),
-                'shop_name': ('দোকানের নাম', vendor.shop_name or "খালি"),
-                'phone_number': ('মোবাইল নম্বর', vendor.phone_number or "খালি"),
-                'shop_address': ('দোকানের ঠিকানা', vendor.shop_address or "খালি"),
-                'category': ('ক্যাটাগরি', vendor.category or "খালি"),
-                'description': ('বিবরণ', vendor.description or "খালি"),
-                'activities': ('কার্যক্রম', ", ".join(vendor.activities) if vendor.activities else "কিছু নেই"),
-                'rating': ('রেটিং', float(vendor.rating) if vendor.rating else 0.0),
-                'review_count': ('রিভিউ সংখ্যা', vendor.review_count if vendor.review_count else 0),
+                'vendor_name': ('Vendor Name', vendor.vendor_name or "Not provided"),
+                'shop_name': ('Shop Name', vendor.shop_name or "Not provided"),
+                'phone_number': ('Phone Number', vendor.phone_number or "Not provided"),
+                'shop_address': ('Shop Address', vendor.shop_address or "Not provided"),
+                'category': ('Category', vendor.category or "Not provided"),
+                'description': ('Description', vendor.description or "Not provided"),
+                'activities': ('Activities', ", ".join(vendor.activities) if vendor.activities else "Not provided"),
+                'rating': ('Rating', float(vendor.rating) if vendor.rating else 0.0),
+                'review_count': ('Review Count', vendor.review_count if vendor.review_count else 0),
             }
 
             # প্রতিটি ফিল্ড চেক করি যেটা চেঞ্জ করতে চাইছে
@@ -1504,7 +1504,7 @@ class AdminPendingVendorUpdateRequestsView(APIView):
 
                     # activities লিস্ট হলে স্ট্রিং করি
                     if field_key == 'activities' and isinstance(new_value, list):
-                        new_value = ", ".join(new_value) if new_value else "কিছু নেই"
+                        new_value = ", ".join(new_value) if new_value else "Not provided"
 
                     # রেটিং ফ্লোট করি
                     if field_key == 'rating':
@@ -1519,8 +1519,8 @@ class AdminPendingVendorUpdateRequestsView(APIView):
 
                     changes.append({
                         "field": bangla_name,
-                        "old": old_str if old_str != "খালি" else "খালি",
-                        "new": new_str if new_str else "খালি",
+                        "old": old_str if old_str != "Not provided" else "Not provided",
+                        "new": new_str if new_str else "Not provided",
                         "changed": old_str != new_str
                     })
 
@@ -1539,22 +1539,22 @@ class AdminPendingVendorUpdateRequestsView(APIView):
                 "request_id": req.id,
                 "vendor_id": vendor.id,
                 "vendor_email": vendor.user.email,
-                "shop_name": vendor.shop_name or "নাম দেয়নি",
-                "phone_number": vendor.phone_number or "দেয়নি",
+                "shop_name": vendor.shop_name or "Name not provided",
+                "phone_number": vendor.phone_number or "not provided",
                 "requested_by": req.requested_by.email,
                 "requested_at": req.created_at.strftime("%d %b %Y, %I:%M %p"),
                 "time_ago": self._time_ago(req.created_at),
 
-                # মূল জিনিস: পুরানো vs নতুন
+                # Main thing: old vs new
                 "changes": changes,
                 "total_changes": len(changes),
 
-                # ছবি
+                # Images
                 "current_images": old_images_count,
                 "will_add_images": new_images_count,
                 "new_shop_images_preview": req.shop_images[:3] if req.shop_images else [],
 
-                # ডকুমেন্ট
+                # Documents
                 "has_documents": bool(req.nid_front or req.nid_back or req.trade_license),
                 "documents": documents,
             })
@@ -1562,7 +1562,7 @@ class AdminPendingVendorUpdateRequestsView(APIView):
         return Response({
             "success": True,
             "total_pending": total_pending,
-            "message": f"মোট {total_pending}টি পেন্ডিং রিকোয়েস্ট আছে" if total_pending else "কোনো পেন্ডিং রিকোয়েস্ট নেই",
+            "message": f"Total {total_pending} pending requests" if total_pending else "No pending requests",
             "pending_requests": request_list
         }, status=200)
 
@@ -1572,17 +1572,17 @@ class AdminPendingVendorUpdateRequestsView(APIView):
         diff = now - past_time
 
         if diff.days > 0:
-            return f"{diff.days} দিন আগে"
+            return f"{diff.days} days ago"
         elif diff.seconds >= 7200:
-            return f"{diff.seconds // 3600} ঘণ্টা আগে"
+            return f"{diff.seconds // 3600} hours ago"
         elif diff.seconds >= 3600:
-            return "১ ঘণ্টা আগে"
+            return "1 hour ago"
         elif diff.seconds >= 120:
-            return f"{diff.seconds // 60} মিনিট আগে"
+            return f"{diff.seconds // 60} minutes ago"
         elif diff.seconds >= 60:
-            return "১ মিনিট আগে"
+            return "1 minute ago"
         else:
-            return "এইমাত্র"
+            return "Just now"
 
 # ================== ADMIN ONLY API: Approve / Reject (Postman Friendly) ==================
 
@@ -1646,7 +1646,7 @@ def approve_vendor_registration(request, user_id):
     if request.user.role != 'admin':
         return Response({
             "success": False,
-            "message": "শুধুমাত্র এডমিন এই কাজ করতে পারবেন"
+            "message": "Only admins can perform this action"
         }, status=403)
 
     try:
@@ -1654,33 +1654,32 @@ def approve_vendor_registration(request, user_id):
     except User.DoesNotExist:
         return Response({
             "success": False,
-            "message": "এই আইডি দিয়ে কোনো ভেন্ডর পাওয়া যায়নি"
+            "message": "No vendor found with this ID"
         }, status=404)
 
     if user.is_active:
         return Response({
             "success": False,
-            "message": "এই ভেন্ডর ইতিমধ্যে অনুমোদিত হয়েছে"
+            "message": "This vendor has already been approved"
         }, status=400)
 
-    # অনুমোদন দেওয়া
+  
     user.is_active = True
     user.save(update_fields=['is_active'])
 
-    # ভেন্ডরকে স্বাগতম ইমেইল
+    # Send welcome email to vendor
     try:
         send_mail(
-            subject="আপনার ভেন্ডর একাউন্ট অনুমোদিত হয়েছে!",
-            message=f"""প্রিয় {user.full_name or 'ভেন্ডর'},
+            subject="Your vendor account has been approved!",
+            message=f"""Dear {user.full_name or 'vendor'},
 
-আপনার ভেন্ডর একাউন্ট সফলভাবে অনুমোদিত হয়েছে।
-এখন আপনি লগইন করে আপনার দোকানের প্রোফাইল পূরণ করতে পারবেন।
+Your vendor account has been successfully approved.
+You can now log in and complete your shop profile.
+Email: {user.email}
+Login Link: {getattr(settings, 'FRONTEND_URL', 'https://yourapp.com')}/vendor/login
 
-ইমেইল: {user.email}
-লগইন লিংক: {getattr(settings, 'FRONTEND_URL', 'https://yourapp.com')}/vendor/login
-
-ধন্যবাদ,
-টিম""",
+Thank you,
+The Team""",
             from_email=settings.DEFAULT_FROM_EMAIL,
             recipient_list=[user.email],
             fail_silently=True,
@@ -1692,7 +1691,7 @@ def approve_vendor_registration(request, user_id):
 
     return Response({
         "success": True,
-        "message": f"ভেন্ডর {user.email} সফলভাবে অনুমোদিত হয়েছে। এখন লগইন করতে পারবে।"
+        "message": f"vendor {user.email} has been successfully approved and can now log in."
     }, status=200)
 
 
@@ -1707,7 +1706,7 @@ def approve_vendor_update_request(request, request_id):
     URL: POST /admin/approve-update/<int:request_id>/
     """
     if request.user.role != 'admin':
-        return Response({"success": False, "message": "শুধুমাত্র এডমিন"}, status=403)
+        return Response({"success": False, "message": "Only admins"}, status=403)
 
     req = get_object_or_404(VendorProfileUpdateRequest, id=request_id, status='pending')
     vendor = req.vendor
@@ -1738,7 +1737,7 @@ def approve_vendor_update_request(request, request_id):
 
     return Response({
         "success": True,
-        "message": "ভেন্ডর প্রোফাইল সফলভাবে আপডেট করা হয়েছে!",
+        "message": "Vendor profile has been successfully updated!",
         "vendor_email": vendor.user.email,
         "shop_name": vendor.shop_name,
         "total_shop_images": len(vendor.shop_images or []),
@@ -1760,7 +1759,7 @@ def reject_vendor_update_request(request, request_id):
     req = get_object_or_404(VendorProfileUpdateRequest, id=request_id, status='pending')
     vendor = req.vendor
 
-    reason = request.data.get('reason', '').strip() or "কোনো কারণ উল্লেখ করা হয়নি"
+    reason = request.data.get('reason', '').strip() or "No reason provided"
 
     req.status = 'rejected'
     req.reviewed_by = request.user
@@ -1771,17 +1770,16 @@ def reject_vendor_update_request(request, request_id):
     # ভেন্ডরকে ইমেইল
     try:
         send_mail(
-            subject="প্রোফাইল আপডেট রিকোয়েস্ট রিজেক্ট হয়েছে",
-            message=f"""প্রিয় {vendor.user.full_name or 'ভেন্ডর'},
+            subject="Profile Update Request Rejected",
+            message=f"""Dear {vendor.user.full_name or 'vendor'},
 
-আপনার প্রোফাইল আপডেট রিকোয়েস্ট রিজেক্ট করা হয়েছে।
+Your profile update request has been rejected.
 
-কারণ: {reason}
+Reason: {reason}
+Please make the necessary corrections and submit the request again.
 
-অনুগ্রহ করে সংশোধন করে আবার রিকোয়েস্ট পাঠান।
-
-ধন্যবাদ,
-টিম""",
+Thank you,
+The Team""",
             from_email=settings.DEFAULT_FROM_EMAIL,
             recipient_list=[vendor.user.email],
             fail_silently=True,
@@ -1793,7 +1791,7 @@ def reject_vendor_update_request(request, request_id):
 
     return Response({
         "success": True,
-        "message": "রিকোয়েস্ট সফলভাবে রিজেক্ট করা হয়েছে",
+        "message": "Request has been successfully rejected",
         "reason": reason,
         "rejected_by": request.user.email,
         "rejected_at": localtime(req.reviewed_at).strftime("%d %b %Y, %I:%M %p")
@@ -1854,7 +1852,7 @@ def user_nearby_vendors(request):
     if user_lat is None or user_lng is None:
         return Response({
             "success": False,
-            "message": "তোমার প্রোফাইলে লোকেশন নেই। অনুগ্রহ করে লোকেশন আপডেট করো।"
+            "message": "Your profile does not have location information. Please update it."
         }, status=400)
 
     # শুধুমাত্র প্রোফাইল কমপ্লিট এবং লোকেশন সেট করা ভেন্ডর
@@ -1946,7 +1944,7 @@ def category_nearby_vendors(request, category):  # এখানে category path
     if user_lat is None or user_lng is None:
         return Response({
             "success": False,
-            "message": "তোমার প্রোফাইলে লোকেশন নেই। অনুগ্রহ করে আপডেট করো।"
+            "message": "Your profile does not have location information. Please update it."
         }, status=400)
 
     # Vendors filter
@@ -2011,7 +2009,7 @@ class AdminAllVendorCredentialsView(APIView):
         if request.user.role != 'admin':
             return Response({
                 "success": False,
-                "message": "শুধুমাত্র এডমিন এই তথ্য দেখতে পারবেন"
+                "message": "Only admins can view this information"
             }, status=403)
 
         vendors = Vendor.objects.select_related('user').all().order_by('-created_at')
@@ -2021,7 +2019,7 @@ class AdminAllVendorCredentialsView(APIView):
             if vendor.plain_password:  # যাদের পাসওয়ার্ড সেভ আছে
                 credentials.append({
                     "vendor_id": vendor.id,
-                    "shop_name": vendor.shop_name if vendor.shop_name != "N/A" else "নাম দেয়নি",
+                    "shop_name": vendor.shop_name if vendor.shop_name != "N/A" else "not given name",
                     "email": vendor.user.email,
                     "password": vendor.plain_password,  # প্লেইন টেক্সট পাসওয়ার্ড
                     "created_at": vendor.user.date_joined.strftime("%d %b %Y, %I:%M %p")

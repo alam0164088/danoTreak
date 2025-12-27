@@ -12,7 +12,7 @@ urlpatterns = [
     path('campaigns/<int:campaign_id>/update/', views.update_campaign),
     path('campaigns/<int:campaign_id>/delete/', views.delete_campaign),
     path('redeem-history/', views.redeem_history),
-    path('redeem/<int:redemption_id>/toggle/', views.toggle_redemption_status),
+    path('redeem/<int:redemption_id>/', views.redeem_once, name='redeem-once'),
 
     path('block/<int:visitor_id>/', views.block_visitor),
 
