@@ -49,29 +49,40 @@ class Visit(models.Model):
     def __str__(self):
         return f"Visit by {self.visitor} at {self.timestamp}"
 
-
 class Redemption(models.Model):
-    campaign = models.ForeignKey(Campaign, on_delete=models.CASCADE, related_name='redemptions')
-    visitor = models.ForeignKey(Visitor, on_delete=models.CASCADE, related_name='redemptions')
+    campaign = models.ForeignKey(
+        Campaign, on_delete=models.CASCADE, related_name='redemptions'
+    )
+    visitor = models.ForeignKey(
+        Visitor, on_delete=models.CASCADE, related_name='redemptions'
+    )
     aliffited_id = models.CharField(max_length=50, blank=True, null=True)
+
     status = models.CharField(
-        max_length=10, 
+        max_length=10,
         choices=[('pending', 'Pending'), ('redeemed', 'Redeemed')],
         default='pending'
     )
+
     redeemed_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def save(self, *args, **kwargs):
         if self.status == 'redeemed' and not self.aliffited_id:
-            last = Redemption.objects.filter(status='redeemed').order_by('-id').first()
+            last = Redemption.objects.filter(
+                status='redeemed',
+                aliffited_id__isnull=False
+            ).order_by('-id').first()
+
             num = 1
-            if last and last.aliffited_id:
+            if last:
                 try:
                     num = int(last.aliffited_id.replace('ALFF', '')) + 1
-                except ValueError:
-                    num = 1
+                except:
+                    pass
+
             self.aliffited_id = f"ALFF{num:05d}"
+
         super().save(*args, **kwargs)
 
     def __str__(self):

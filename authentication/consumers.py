@@ -169,16 +169,16 @@ class LiveLocationConsumer(AsyncWebsocketConsumer):
         return R * (2 * atan2(sqrt(a), sqrt(1 - a)))
 
 
-
     def perform_auto_checkin(self, user, lat, lng):
         from vendor.models import Visitor, Visit, Campaign, Redemption
         from authentication.models import Vendor, Notification
         from vendor.utils import generate_aliffited_id
         from django.utils import timezone
+        from datetime import timedelta
 
         vendors = Vendor.objects.filter(latitude__isnull=False, longitude__isnull=False)
         vendor_distances = []
-        matched_vendors = []  # ← সব ম্যাচড ভেন্ডর এখানে সেভ হবে
+        matched_vendors = []
 
         # সব ভেন্ডর চেক করা
         for v in vendors:
@@ -197,7 +197,7 @@ class LiveLocationConsumer(AsyncWebsocketConsumer):
 
             if distance <= 100 and vendor_info["has_active_campaign"]:
                 vendor_info["matched"] = True
-                matched_vendors.append(v)  # ← সব ম্যাচড শপ সেভ করা হচ্ছে
+                matched_vendors.append(v)
 
             vendor_distances.append(vendor_info)
 
@@ -211,7 +211,6 @@ class LiveLocationConsumer(AsyncWebsocketConsumer):
         # প্রত্যেক ম্যাচড ভেন্ডরের জন্য আলাদা চেক-ইন + রিডিম চেক
         results = []
         for matched_vendor in matched_vendors:
-            # Visitor তৈরি/পাওয়া
             visitor, _ = Visitor.objects.get_or_create(
                 user=user,
                 vendor=matched_vendor,
@@ -245,17 +244,14 @@ class LiveLocationConsumer(AsyncWebsocketConsumer):
             active_campaigns = Campaign.objects.filter(vendor=matched_vendor, is_active=True)
 
             for campaign in active_campaigns:
-                # আগে রিডিম হয়েছে কি না
-                if Redemption.objects.filter(visitor=visitor, campaign=campaign).exists():
-                    continue
-
                 if visitor.total_visits < campaign.required_visits:
-                    continue
+                    continue  # ভিজিট কম হলে রিডিম না
 
+                # নতুন রিডিম তৈরি, আগের রিডিম থাকলেও
                 redemption = Redemption.objects.create(
                     visitor=visitor,
                     campaign=campaign,
-                    status="redeemed",
+                    status="pending",
                     aliffited_id=generate_aliffited_id()
                 )
 
@@ -284,5 +280,5 @@ class LiveLocationConsumer(AsyncWebsocketConsumer):
             "success": bool(results),
             "message": f"Checked in at {len(results)} vendors successfully",
             "vendors": vendor_distances,
-            "checkin_results": results  # ← দুইটা শপের ফলাফল এখানে আসবে
+            "checkin_results": results
         }
