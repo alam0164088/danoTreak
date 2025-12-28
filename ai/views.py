@@ -1,6 +1,3 @@
-
-
-
 import requests
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -104,7 +101,7 @@ class CategoryNearbyAI(APIView):
 
         for vendor in db_vendors:
             distance = haversine_distance(user_lat, user_lng, vendor.latitude, vendor.longitude)
-            if distance <= 2000:
+            if distance <= 5000:
                 vendors_list.append({
                     "id": vendor.id or str(uuid.uuid4()),  # <-- এখানে ঠিক করা হলো
                     "vendor_name": vendor.vendor_name or "N/A",
@@ -122,7 +119,8 @@ class CategoryNearbyAI(APIView):
                     "location": {
                         "latitude": vendor.latitude,
                         "longitude": vendor.longitude
-                    }
+                    },
+                    "source": "db"
                 })
 
 
@@ -169,21 +167,23 @@ class CategoryNearbyAI(APIView):
                         "location": {
                             "latitude": ai.get("location", {}).get("lat", 0),
                             "longitude": ai.get("location", {}).get("lng", 0)
-                        }
+                        },
+                        "source": "ai"
                     })
         except Exception as e:
             # AI API ফেল করলেও ভিউ ক্র্যাশ করবে না, শুধু লগ হবে
             print("AI API error:", e)
             # vendors_list খালি থাকবে, কিন্তু DB-এর ডাটা (যদি থাকে) রিটার্ন হবে
 
-        # Sort by distance (যদি কোনো vendor থাকে)
-        vendors_list.sort(key=lambda x: x['distance_meters'])
+        # Sort: DB vendors first, then AI; within each group sort by distance (missing distance -> large)
+        vendors_list.sort(key=lambda x: (0 if x.get("source") == "db" else 1,
+                                         x.get("distance_meters", 1e9)))
 
         # অবশ্যই রিটার্ন করতে হবে (try-except এর বাইরে)
         return Response({
             "success": True,
             "your_location": {"lat": user_lat, "lng": user_lng},
-            "search_radius_meters": 2000,
+            "search_radius_meters": 5000,
             "category": category,
             "total_found": len(vendors_list),
             "vendors": vendors_list
