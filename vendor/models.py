@@ -1,10 +1,13 @@
-# vendor/models.py
-
 from django.db import models
 from authentication.models import Vendor as VendorProfile, User
 
+
 class Campaign(models.Model):
-    vendor = models.ForeignKey(VendorProfile, on_delete=models.CASCADE, related_name='campaigns')
+    vendor = models.ForeignKey(
+        VendorProfile, 
+        on_delete=models.CASCADE, 
+        related_name='campaigns'
+    )
     name = models.CharField(max_length=200)
     required_visits = models.PositiveIntegerField(default=5)
     reward_name = models.CharField(max_length=200)
@@ -17,7 +20,11 @@ class Campaign(models.Model):
 
 
 class Visitor(models.Model):
-    vendor = models.ForeignKey(VendorProfile, on_delete=models.CASCADE, related_name='visitors')
+    vendor = models.ForeignKey(
+        VendorProfile, 
+        on_delete=models.CASCADE, 
+        related_name='visitors'
+    )
     user = models.ForeignKey(
         User, 
         on_delete=models.SET_NULL,
@@ -31,12 +38,28 @@ class Visitor(models.Model):
     is_blocked = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
+    class Meta:
+        unique_together = ('vendor', 'user', 'phone')
+
     def __str__(self):
         return f"{self.name or self.phone or 'Anonymous'} ({self.total_visits} visits)"
 
+    def increment_visits(self):
+        """
+        Visit সংখ্যা অটোমেটিক বাড়ানোর ফাংশন
+        """
+        self.total_visits = models.F('total_visits') + 1
+        self.save(update_fields=["total_visits"])
+        # Refresh from DB to get updated value
+        self.refresh_from_db()
+
 
 class Visit(models.Model):
-    visitor = models.ForeignKey(Visitor, on_delete=models.CASCADE, related_name='visits')
+    visitor = models.ForeignKey(
+        Visitor, 
+        on_delete=models.CASCADE, 
+        related_name='visits'
+    )
     vendor = models.ForeignKey(VendorProfile, on_delete=models.CASCADE)
     lat = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     lng = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
@@ -49,12 +72,17 @@ class Visit(models.Model):
     def __str__(self):
         return f"Visit by {self.visitor} at {self.timestamp}"
 
+
 class Redemption(models.Model):
     campaign = models.ForeignKey(
-        Campaign, on_delete=models.CASCADE, related_name='redemptions'
+        Campaign, 
+        on_delete=models.CASCADE, 
+        related_name='redemptions'
     )
     visitor = models.ForeignKey(
-        Visitor, on_delete=models.CASCADE, related_name='redemptions'
+        Visitor, 
+        on_delete=models.CASCADE, 
+        related_name='redemptions'
     )
     aliffited_id = models.CharField(max_length=50, blank=True, null=True)
 
@@ -63,11 +91,13 @@ class Redemption(models.Model):
         choices=[('pending', 'Pending'), ('redeemed', 'Redeemed')],
         default='pending'
     )
-
     redeemed_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def save(self, *args, **kwargs):
+        """
+        ALFF ID অটোমেটিক জেনারেট করার লজিক
+        """
         if self.status == 'redeemed' and not self.aliffited_id:
             last = Redemption.objects.filter(
                 status='redeemed',
@@ -78,7 +108,7 @@ class Redemption(models.Model):
             if last:
                 try:
                     num = int(last.aliffited_id.replace('ALFF', '')) + 1
-                except:
+                except ValueError:
                     pass
 
             self.aliffited_id = f"ALFF{num:05d}"
