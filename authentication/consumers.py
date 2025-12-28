@@ -168,117 +168,87 @@ class LiveLocationConsumer(AsyncWebsocketConsumer):
         a = sin(Δφ / 2)**2 + cos(φ1) * cos(φ2) * sin(Δλ / 2)**2
         return R * (2 * atan2(sqrt(a), sqrt(1 - a)))
 
-
     def perform_auto_checkin(self, user, lat, lng):
         from vendor.models import Visitor, Visit, Campaign, Redemption
         from authentication.models import Vendor, Notification
         from vendor.utils import generate_aliffited_id
-        from django.utils import timezone
-        from datetime import timedelta
 
         vendors = Vendor.objects.filter(latitude__isnull=False, longitude__isnull=False)
-        vendor_distances = []
         matched_vendors = []
 
-        # সব ভেন্ডর চেক করা
         for v in vendors:
             try:
                 distance = self.haversine(lat, lng, float(v.latitude), float(v.longitude))
-            except (TypeError, ValueError):
+            except:
                 continue
-            
-            vendor_info = {
-                "vendor_id": v.id,
-                "vendor_name": v.shop_name,
-                "distance_m": round(distance, 2),
-                "has_active_campaign": v.campaigns.filter(is_active=True).exists(),
-                "matched": False
-            }
 
-            if distance <= 100 and vendor_info["has_active_campaign"]:
-                vendor_info["matched"] = True
-                matched_vendors.append(v)
-
-            vendor_distances.append(vendor_info)
+            if distance <= 100 and v.campaigns.filter(is_active=True).exists():
+                matched_vendors.append((v, round(distance, 2)))
 
         if not matched_vendors:
-            return {
-                "success": False,
-                "message": "No nearby vendor within 100m with active campaign",
-                "vendors": vendor_distances
-            }
+            return {"success": False, "message": "No nearby vendor"}
 
-        # প্রত্যেক ম্যাচড ভেন্ডরের জন্য আলাদা চেক-ইন + রিডিম চেক
         results = []
-        for matched_vendor in matched_vendors:
+
+        for vendor, distance in matched_vendors:
+
             visitor, _ = Visitor.objects.get_or_create(
                 user=user,
-                vendor=matched_vendor,
+                vendor=vendor,
                 defaults={"name": user.get_full_name() or user.email.split("@")[0]}
             )
 
             if visitor.is_blocked:
-                results.append({
-                    "vendor_name": matched_vendor.shop_name,
-                    "message": "Blocked by vendor"
-                })
                 continue
 
-            # ৫ মিনিটের মধ্যে আগে ভিজিট হয়েছে কি না
-            five_min_ago = timezone.now() - timedelta(minutes=5)
-            if Visit.objects.filter(visitor=visitor, timestamp__gte=five_min_ago).exists():
-                results.append({
-                    "vendor_name": matched_vendor.shop_name,
-                    "message": "Already visited recently"
-                })
-                continue
+            # ✅ ALWAYS CREATE VISIT
+            Visit.objects.create(
+                visitor=visitor,
+                vendor=vendor,
+                lat=lat,
+                lng=lng
+            )
 
-            # নতুন Visit রেকর্ড তৈরি
-            Visit.objects.create(visitor=visitor, vendor=matched_vendor, lat=lat, lng=lng)
             visitor.total_visits += 1
             visitor.save(update_fields=["total_visits"])
 
-            # রিডিম + নোটিফিকেশন লজিক
             rewards = []
             aliffited_ids = []
-            active_campaigns = Campaign.objects.filter(vendor=matched_vendor, is_active=True)
 
-            for campaign in active_campaigns:
-                if visitor.total_visits < campaign.required_visits:
-                    continue  # ভিজিট কম হলে রিডিম না
+            campaigns = Campaign.objects.filter(vendor=vendor, is_active=True)
 
-                # নতুন রিডিম তৈরি, আগের রিডিম থাকলেও
-                redemption = Redemption.objects.create(
-                    visitor=visitor,
-                    campaign=campaign,
-                    status="pending",
-                    aliffited_id=generate_aliffited_id()
-                )
+            for campaign in campaigns:
+                if visitor.total_visits >= campaign.required_visits:
+                    redemption = Redemption.objects.create(
+                        visitor=visitor,
+                        campaign=campaign,
+                        status="pending",
+                        aliffited_id=generate_aliffited_id()
+                    )
 
-                rewards.append(campaign.reward_name)
-                aliffited_ids.append(redemption.aliffited_id)
+                    rewards.append(campaign.reward_name)
+                    aliffited_ids.append(redemption.aliffited_id)
 
-                Notification.objects.create(
-                    user=user,
-                    title="🎉 Redeem Unlocked!",
-                    message=f"You unlocked a reward from {matched_vendor.shop_name}!",
-                    aliffited_id=redemption.aliffited_id,
-                    shop_name=matched_vendor.shop_name,
-                    reward_name=campaign.reward_name
-                )
+                    Notification.objects.create(
+                        user=user,
+                        title="🎉 Redeem Unlocked!",
+                        message=f"You unlocked {campaign.reward_name}",
+                        aliffited_id=redemption.aliffited_id,
+                        shop_name=vendor.shop_name,
+                        reward_name=campaign.reward_name
+                    )
 
             results.append({
-                "vendor_name": matched_vendor.shop_name,
-                "vendor_id": matched_vendor.id,
+                "vendor_id": vendor.id,
+                "vendor_name": vendor.shop_name,
+                "distance": distance,
                 "total_visits": visitor.total_visits,
                 "rewards": rewards,
-                "aliffited_ids": aliffited_ids,
-                "message": "Checked in successfully"
+                "aliffited_ids": aliffited_ids
             })
 
         return {
-            "success": bool(results),
-            "message": f"Checked in at {len(results)} vendors successfully",
-            "vendors": vendor_distances,
-            "checkin_results": results
+            "success": True,
+            "message": "Check-in successful",
+            "checkins": results
         }

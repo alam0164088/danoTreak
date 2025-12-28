@@ -32,10 +32,11 @@ def dashboard_overview(request):
             campaign__vendor=vendor, status='redeemed'
         ).count()
     })
-
-
-
-
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from django.db.models import Count
+from .models import Visitor, Campaign, Redemption
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
@@ -44,50 +45,57 @@ def user_management(request):
     if not vendor:
         return Response({"error": "Vendor profile not found"}, status=403)
 
-    visitors = Visitor.objects.filter(vendor=vendor).order_by(
-        '-total_visits', '-created_at'
-    )
+    try:
+        # প্রতিটি visitor এর আসল visit সংখ্যা
+        visitors = Visitor.objects.filter(vendor=vendor).annotate(visit_count=Count('visits'))
 
-    response = []
+        # active campaigns
+        active_campaigns = Campaign.objects.filter(vendor=vendor, is_active=True)
 
-    for visitor in visitors:
-        campaigns_data = []
-        campaigns = Campaign.objects.filter(vendor=vendor, is_active=True)
+        data = []
 
-        for campaign in campaigns:
-            redemption = Redemption.objects.filter(
-                visitor=visitor,
-                campaign=campaign
-            ).first()
+        for visitor in visitors:
+            visitor_name = visitor.name or visitor.phone or "Anonymous"
 
-            # 🔥 REQUIRED VISITS পূর্ণ হলে pending create
-            if not redemption and visitor.total_visits >= campaign.required_visits:
-                redemption = Redemption.objects.create(
-                    visitor=visitor,
-                    campaign=campaign,
-                    status='pending'
-                )
+            for campaign in active_campaigns:
+                # Redemption count
+                try:
+                    redemption_count = Redemption.objects.filter(
+                        visitor=visitor,
+                        campaign=campaign,
+                        status='redeemed'
+                    ).count()
+                except Exception:
+                    redemption_count = 0
 
-            status = redemption.status if redemption else 'not_eligible'
+                # Eligible check
+                eligible = visitor.visit_count >= (campaign.required_visits or 0)
 
-            campaigns_data.append({
-                "campaign_id": campaign.id,
-                "campaign_name": campaign.name,
-                "reward_name": campaign.reward_name,
-                "status": status,
-                "aliffited_id": redemption.aliffited_id if redemption else None
-            })
+                # Reward name safe access
+                reward_name = getattr(campaign, 'reward_name', None)
 
-        response.append({
-            "visitor_id": visitor.id,
-            "visitor_name": visitor.name,
-            "visitor_phone": visitor.phone,
-            "total_visits": visitor.total_visits,
-            "is_blocked": visitor.is_blocked,
-            "campaigns": campaigns_data
-        })
+                data.append({
+                    "visitor_id": visitor.id,
+                    "visitor_name": visitor_name,
+                    "user_id": visitor.user.id if getattr(visitor, 'user', None) else None,
+                    "campaign_id": campaign.id,
+                    "campaign_name": getattr(campaign, 'name', None),
+                    "reward_name": reward_name,
+                    "required_visits": getattr(campaign, 'required_visits', 0),
+                    "total_visits": visitor.visit_count,
+                    "redeemed_times": redemption_count,
+                    "eligible": eligible
+                })
 
-    return Response({"visitors": response})
+        return Response({
+            "vendor": getattr(vendor, 'shop_name', 'Unknown Vendor'),
+            "total_visitors": visitors.count(),
+            "data": data
+        }, status=200)
+
+    except Exception as e:
+        # কোনো unexpected error হলে
+        return Response({"error": str(e)}, status=500)
 
 
 
@@ -103,11 +111,16 @@ def campaign_list(request):
         redemption_number=Count(
             'redemptions',
             filter=Q(redemptions__status='redeemed')
-        )
+        ),
+        pending_number=Count(
+            'redemptions',
+            filter=Q(redemptions__status='pending')
+        ),
+        total_redemptions=Count('redemptions')
     ).values(
         'id', 'name', 'reward_name', 'required_visits',
         'reward_description', 'is_active',
-        'created_at', 'redemption_number'
+        'created_at', 'redemption_number', 'pending_number', 'total_redemptions'
     )
 
     return Response({"campaigns": list(campaigns)})
@@ -278,6 +291,14 @@ def confirm_redemption(request, redemption_id):
         "status": "redeemed",
         "aliffited_id": redemption.aliffited_id
     })
+
+
+
+
+
+
+
+
 
 
 
