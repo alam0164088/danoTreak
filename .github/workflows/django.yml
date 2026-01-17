@@ -52,8 +52,8 @@ jobs:
       # 7️⃣ Deploy to AWS
       - name: Deploy to AWS
         run: |
-          ssh -o StrictHostKeyChecking=no ubuntu@${{ secrets.AWS_HOST }} "
-            cd /home/ubuntu/danoTreak-main &&
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no ubuntu@${{ secrets.AWS_HOST }} "
+            cd /home/ubuntu/danoTreak &&
             git pull &&
             source env/bin/activate &&
             pip install -r requirements.txt &&
