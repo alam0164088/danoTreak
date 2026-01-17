@@ -27,6 +27,10 @@ jobs:
       - name: Run tests
         run: |
           pytest -q
-      - name: Check for Autobahn version
+      - name: Install deps
         run: |
-          pip show autobahn | grep Version
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-django
+
+      
