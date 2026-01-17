@@ -3,42 +3,41 @@ from pathlib import Path
 from datetime import timedelta
 import environ
 
-# ===================== BASE DIR =====================
+# ===================== BASE DIR & ENV SETUP =====================
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# ===================== ENV SETUP =====================
 env = environ.Env(
     DEBUG=(bool, False),
-    SECRET_KEY=(str, "django-insecure-default-key-change-me"),
     ALLOWED_HOSTS=(list, ["localhost", "127.0.0.1"]),
-    DATABASE_URL=(str, "sqlite:///db.sqlite3"),  # fallback for CI/test
 )
 
-# Load .env if exists
-env_file = BASE_DIR / ".env"
-if env_file.exists():
-    environ.Env.read_env(env_file)
+# .env ফাইল রিড করা
+environ.Env.read_env(os.path.join(BASE_DIR, '.env'))
 
-# ===================== SECURITY =====================
+# ===================== CORE SETTINGS =====================
 SECRET_KEY = env("SECRET_KEY")
 DEBUG = env("DEBUG")
 ALLOWED_HOSTS = env.list("ALLOWED_HOSTS")
-APPEND_SLASH = False
+
+
+# ===================== CORE SETTINGS =====================
+SECRET_KEY = env("SECRET_KEY")
+DEBUG = env("DEBUG")
+ALLOWED_HOSTS = env.list("ALLOWED_HOSTS")
 
 # ===================== APPLICATIONS =====================
 INSTALLED_APPS = [
-    'daphne',                    # ← ১. সবার উপরে daphne
-    'channels',                  # ← ২. তারপর channels
-
-    # Django built-in apps
+    'daphne',                    # ASGI এর জন্য সবার উপরে
+    'channels',
+    
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
     "django.contrib.sessions",
     "django.contrib.messages",
-    "django.contrib.staticfiles",   # ← এটা এখানে
+    "django.contrib.staticfiles", # collectstatic কমান্ডের জন্য এটি জরুরি
     "django.contrib.sites",
-
+    
     # Third-party
     "rest_framework",
     "rest_framework_simplejwt",
@@ -48,20 +47,20 @@ INSTALLED_APPS = [
     "allauth.account",
     "allauth.socialaccount",
     "allauth.socialaccount.providers.google",
-    "allauth.socialaccount.providers.apple",
-
+    
     # Local apps
     "authentication",
     "vendor",
-    "django.contrib.gis",
+    "django.contrib.gis",         # GeoDjango (GDAL লাইব্রেরি লাগবে)
     "ai",
 ]
 
-# ===================== MIDDLEWARE =====================
+
+
 MIDDLEWARE = [
-    "corsheaders.middleware.CorsMiddleware",
+    "corsheaders.middleware.CorsMiddleware",         # সবার উপরে রাখা ভালো
     "django.middleware.security.SecurityMiddleware",
-    "whitenoise.middleware.WhiteNoiseMiddleware",
+    "whitenoise.middleware.WhiteNoiseMiddleware",    # Security এর ঠিক পরেই
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -71,37 +70,13 @@ MIDDLEWARE = [
     "allauth.account.middleware.AccountMiddleware",
 ]
 
-# ===================== URLS & WSGI =====================
 ROOT_URLCONF = "myproject.urls"
 WSGI_APPLICATION = "myproject.wsgi.application"
+ASGI_APPLICATION = "myproject.asgi.application"
 
-# ===================== DATABASE =====================
+# ===================== DATABASE (PostgreSQL) =====================
 DATABASES = {
     "default": env.db(),
-}
-
-# ===================== AUTH =====================
-AUTH_USER_MODEL = "authentication.User"
-SITE_ID = 1
-
-AUTHENTICATION_BACKENDS = [
-    "django.contrib.auth.backends.ModelBackend",
-    "allauth.account.auth_backends.AuthenticationBackend",
-]
-
-# ===================== REST & JWT =====================
-REST_FRAMEWORK = {
-    "DEFAULT_AUTHENTICATION_CLASSES": (
-        "rest_framework_simplejwt.authentication.JWTAuthentication",
-    ),
-}
-
-
-SIMPLE_JWT = {
-    "ACCESS_TOKEN_LIFETIME": timedelta(days=365),   # ১ বছর
-    "REFRESH_TOKEN_LIFETIME": timedelta(days=365*9),  # ৯ বছর
-    "ROTATE_REFRESH_TOKENS": False,
-    "BLACKLIST_AFTER_ROTATION": False,
 }
 
 # ===================== TEMPLATES =====================
@@ -121,16 +96,32 @@ TEMPLATES = [
     },
 ]
 
-# ===================== EMAIL (Safe Default for CI) =====================
+
+# ===================== AUTH & JWT =====================
+AUTH_USER_MODEL = "authentication.User"
+SITE_ID = 1
+
+REST_FRAMEWORK = {
+    "DEFAULT_AUTHENTICATION_CLASSES": (
+        "rest_framework_simplejwt.authentication.JWTAuthentication",
+    ),
+}
+
+SIMPLE_JWT = {
+    "ACCESS_TOKEN_LIFETIME": timedelta(days=365),
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=365*2),
+}
+
+# ===================== EMAIL CONFIG =====================
 EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
-EMAIL_HOST = env("EMAIL_HOST", default="localhost")
-EMAIL_PORT = env.int("EMAIL_PORT", default=1025)
-EMAIL_USE_TLS = env.bool("EMAIL_USE_TLS", default=False)
-EMAIL_HOST_USER = env("EMAIL_HOST_USER", default="")
-EMAIL_HOST_PASSWORD = env("EMAIL_HOST_PASSWORD", default="")
+EMAIL_HOST = env("EMAIL_HOST")
+EMAIL_PORT = env.int("EMAIL_PORT")
+EMAIL_USE_TLS = env.bool("EMAIL_USE_TLS")
+EMAIL_HOST_USER = env("EMAIL_HOST_USER")
+EMAIL_HOST_PASSWORD = env("EMAIL_HOST_PASSWORD")
 DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
 
-# ===================== STATIC & MEDIA =====================
+# ===================== STATIC FILES =====================
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
@@ -138,43 +129,40 @@ STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
-# ===================== CORS =====================
+# ===================== CORS & SECURITY =====================
 CORS_ALLOW_CREDENTIALS = True
+
+
+# এখানে সরাসরি আপনার আইপি এবং লোকালহোস্ট দেওয়া হলো (নিরাপদ উপায়)
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
-    "http://10.10.7.19:3000",
-    "http://10.10.7.86:3000",   # এটা যোগ করুন
+    "http://3.144.126.69",      # আপনার AWS IP
+    "https://3.144.126.69", 
+    "http://api.trekbot.ai",    # <--- নতুন যোগ করা হয়েছে
+    "https://api.trekbot.ai",    # যদি SSL ব্যবহার করেন
 ]
 
-# অথবা আরো সহজে – পুরো লোকাল নেটওয়ার্ককে allow করুন
+CSRF_TRUSTED_ORIGINS = [
+    "http://3.144.126.69",
+    "https://3.144.126.69",
+    "http://127.0.0.1",
+    "https://api.trekbot.ai",   # <--- নতুন
+    "http://api.trekbot.ai",
+]
 
-# ===================== ALLAUTH =====================
-ACCOUNT_LOGIN_METHODS = {"email"}                      # নতুন + সঠিক
-ACCOUNT_SIGNUP_FIELDS = ["email*", "password1*", "password2*"]  # নতুন + সঠিক
-
-
-ACCOUNT_UNIQUE_EMAIL = True
-ACCOUNT_EMAIL_VERIFICATION = "optional"
-
-ACCOUNT_SIGNUP_FIELDS = ["email*", "password1*", "password2*"]
-ACCOUNT_LOGIN_METHODS = {"email": True}
-
-SOCIALACCOUNT_EMAIL_REQUIRED = True
-SOCIALACCOUNT_QUERY_EMAIL = True
+# ===================== GOOGLE AUTH =====================
 SOCIALACCOUNT_LOGIN_ON_GET = True
+GOOGLE_CLIENT_ID = env("GOOGLE_CLIENT_ID")
+GOOGLE_CLIENT_SECRET = env("GOOGLE_CLIENT_SECRET")
+GOOGLE_REDIRECT_URI = env("GOOGLE_REDIRECT_URI")
 
-# ===================== GOOGLE & APPLE (with safe defaults) =====================
-GOOGLE_CLIENT_ID = env("GOOGLE_CLIENT_ID", default="")
-GOOGLE_CLIENT_SECRET = env("GOOGLE_CLIENT_SECRET", default="")
-GOOGLE_REDIRECT_URI = env(
-    "GOOGLE_REDIRECT_URI", 
-    default="http://127.0.0.1:8000/api/auth/google/callback/"
-)
-
-APPLE_CLIENT_ID = env("APPLE_CLIENT_ID", default="")
-APPLE_SECRET = env("APPLE_SECRET", default="")
-APPLE_KEY_ID = env("APPLE_KEY_ID", default="")
+# ===================== CHANNELS =====================
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels.layers.InMemoryChannelLayer",
+    },
+}
 
 # ===================== OTHER =====================
 LANGUAGE_CODE = "en-us"
@@ -182,17 +170,3 @@ TIME_ZONE = "Asia/Dhaka"
 USE_I18N = True
 USE_TZ = True
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
-
-
-# settings.py এর শেষের দিকে যোগ করো
-
-# ASGI Application (WebSocket এর জন্য)
-ASGI_APPLICATION = "myproject.asgi.application"
-
-# Channels + Redis (Live Location এর জন্য)
-# Redis ছাড়াই চলবে (ডেভেলপমেন্টের জন্য পারফেক্ট)
-CHANNEL_LAYERS = {
-    "default": {
-        "BACKEND": "channels.layers.InMemoryChannelLayer",
-    },
-}

@@ -202,7 +202,7 @@ class ChatNormalAPI(APIView):
         if not user_lat or not user_lng:
             return Response({
                 "success": False,
-                "message": "লোকেশন পাওয়া যায়নি। প্রোফাইল আপডেট করুন।"
+                "message": "location could not be found. Please update your profile."
             }, status=400)
 
         message = request.data.get("message")  # ফ্রন্টএন্ড থেকে message নেওয়া
@@ -227,7 +227,7 @@ class ChatPlacesAPI(APIView):
         user_lat, user_lng = get_user_location(request)
 
         if not user_lat or not user_lng:
-            return Response({"success": False, "message": "লোকেশন পাওয়া যায়নি।"}, status=400)
+            return Response({"success": False, "message": "location could not be found."}, status=400)
 
         message = request.data.get("message")
         if not message:
@@ -253,11 +253,11 @@ class ChatRestaurantAPI(APIView):
         user_lat, user_lng = get_user_location(request)
 
         if not user_lat or not user_lng:
-            return Response({"success": False, "message": "লোকেশন পাওয়া যায়নি।"}, status=400)
+            return Response({"success": False, "message": "location could not be found."}, status=400)
 
         message = request.data.get("message")
         if not message:
-            return Response({"success": False, "message": "message প্রয়োজন"}, status=400)
+            return Response({"success": False, "message": "message required"}, status=400)
 
         final_payload = {
             "user_input": message,   # message কে user_input হিসেবে পাঠানো হচ্ছে
@@ -277,11 +277,11 @@ class ChatBeverageAPI(APIView):
         user_lat, user_lng = get_user_location(request)
 
         if not user_lat or not user_lng:
-            return Response({"success": False, "message": "লোকেশন পাওয়া যায়নি।"}, status=400)
+            return Response({"success": False, "message": "location could not be found."}, status=400)
 
         message = request.data.get("message")
         if not message:
-            return Response({"success": False, "message": "message প্রয়োজন"}, status=400)
+            return Response({"success": False, "message": "message required"}, status=400)
 
         final_payload = {
             "user_input": message,
@@ -301,12 +301,11 @@ class ChatLodgingAPI(APIView):
         user_lat, user_lng = get_user_location(request)
 
         if not user_lat or not user_lng:
-            return Response({"success": False, "message": "লোকেশন পাওয়া যায়নি।"}, status=400)
+            return Response({"success": False, "message": "location could not be found."}, status=400)
 
         message = request.data.get("message")
         if not message:
-            return Response({"success": False, "message": "message প্রয়োজন"}, status=400)
-
+            return Response({"success": False, "message": "message required"}, status=400)
         final_payload = {
             "user_input": message,
             "latitude": user_lat,
@@ -325,11 +324,11 @@ class ChatActivitiesAPI(APIView):
         user_lat, user_lng = get_user_location(request)
 
         if not user_lat or not user_lng:
-            return Response({"success": False, "message": "লোকেশন পাওয়া যায়নি।"}, status=400)
+            return Response({"success": False, "message": "location could not be found."}, status=400)
 
         message = request.data.get("message")
         if not message:
-            return Response({"success": False, "message": "message প্রয়োজন"}, status=400)
+            return Response({"success": False, "message": "message required"}, status=400)
 
         final_payload = {
             "user_input": message,
@@ -352,7 +351,7 @@ class ChatItineraryAPI(APIView):
         if not user_lat or not user_lng:
             return Response({
                 "success": False,
-                "message": "লোকেশন পাওয়া যায়নি। প্রোফাইল আপডেট করুন।"
+                "message": "location could not be found. Please update your profile."
             }, status=400)
 
         # ফ্রন্টএন্ড থেকে message ও preferences নাও
@@ -360,7 +359,7 @@ class ChatItineraryAPI(APIView):
         preferences = request.data.get("preferences", {})  # ডিফল্ট খালি ডিকশনারি
 
         if not message:
-            return Response({"success": False, "message": "message প্রয়োজন"}, status=400)
+            return Response({"success": False, "message": "message required"}, status=400)
 
         # AI সার্ভারে পাঠানোর ফাইনাল পে-লোড
         final_payload = {
@@ -387,14 +386,14 @@ class GetLocationAPI(APIView):
         if user_lat is None or user_lng is None:
             return Response({
                 "success": False,
-                "message": "লোকেশন পাওয়া যায়নি। প্রোফাইল আপডেট করুন।"
+                "message": "location could not be found. Please update your profile."
             }, status=status.HTTP_400_BAD_REQUEST)
 
         category = request.data.get("category")
         if not category:
             return Response({
                 "success": False,
-                "message": "category প্রয়োজন"
+                "message": "category required"
             }, status=status.HTTP_400_BAD_REQUEST)
 
         payload = {
@@ -447,13 +446,13 @@ def get_vendor_info(fav):
             return None
         return {
             "id": str(v.id),
-            "shop_name": v.shop_name or "নাম নেই",
-            "vendor_name": v.vendor_name or "অজানা",
-            "category": getattr(v, 'category', 'অজানা'),
+            "shop_name": v.shop_name or "name not available",
+            "vendor_name": v.vendor_name or "unknown",
+            "category": getattr(v, 'category', 'unknown'),
             "rating": float(v.rating) if v.rating else 0.0,
             "review_count": getattr(v, 'review_count', 0),
             "shop_image": v.shop_images[0] if v.shop_images else None,
-            "phone": v.phone_number or "ফোন নেই",
+            "phone": v.phone_number or "phone not available",
             "latitude": float(v.latitude),
             "longitude": float(v.longitude),
             "is_ai_vendor": False,
@@ -467,13 +466,13 @@ def get_vendor_info(fav):
             return None
         return {
             "id": fav.ai_vendor_id,
-            "shop_name": data.get("shop_name", "AI দোকান"),
-            "vendor_name": data.get("vendor_name", "অজানা"),
+            "shop_name": data.get("shop_name", "AI shop"),
+            "vendor_name": data.get("vendor_name", "unknown"),
             "category": data.get("category", "place"),
             "rating": data.get("rating", 0.0),
             "review_count": data.get("review_count", 0),
             "shop_image": data.get("shop_images", [None])[0],
-            "phone": data.get("phone_number", "ফোন পাওয়া যায়নি"),
+            "phone": data.get("phone_number", "phone not available"),
             "latitude": float(lat),
             "longitude": float(lng),
             "is_ai_vendor": True,
@@ -487,7 +486,7 @@ class ToggleFavoriteVendor(APIView):
     def post(self, request):
         vendor_id = request.data.get('vendor_id')
         if not vendor_id:
-            return Response({"success": False, "message": "vendor_id দিন"}, status=400)
+            return Response({"success": False, "message": "vendor_id required"}, status=400)
 
         user = request.user
         # AI vendor check
@@ -502,7 +501,7 @@ class ToggleFavoriteVendor(APIView):
             if favorite:
                 vendor_data = favorite.ai_vendor_data
                 favorite.delete()
-                return Response({"success": True, "message": "ফেভারিট থেকে সরানো হয়েছে", "is_favorite": False, "vendor": vendor_data})
+                return Response({"success": True, "message": "Removed from favorites", "is_favorite": False, "vendor": vendor_data})
 
             ai_data = request.data.get("ai_vendor_data", {})
             favorite = FavoriteVendor.objects.create(
@@ -511,22 +510,21 @@ class ToggleFavoriteVendor(APIView):
                 expiry_date=timezone.now() + timedelta(days=7),
                 ai_vendor_data=ai_data
             )
-            return Response({"success": True, "message": "ফেভারিটে যোগ করা হয়েছে (৭ দিনের জন্য)", "is_favorite": True, "vendor": ai_data})
+            return Response({"success": True, "message": "Added to favorites (for 7 days)", "is_favorite": True, "vendor": ai_data})
         else:
             try:
                 vendor = Vendor.objects.get(id=vendor_id)
             except Vendor.DoesNotExist:
-                return Response({"success": False, "message": "দোকান পাওয়া যায়নি"}, status=404)
+                return Response({"success": False, "message": "Vendor not found"}, status=404)
 
             favorite = FavoriteVendor.objects.filter(user=user, vendor=vendor).first()
             if favorite:
                 favorite.delete()
-                return Response({"success": True, "message": "ফেভারিট থেকে সরানো হয়েছে", "is_favorite": False, "vendor": None})
+                return Response({"success": True, "message": "Removed from favorites", "is_favorite": False, "vendor": None})
 
             favorite = FavoriteVendor.objects.create(user=user, vendor=vendor)
             vendor_data = get_vendor_info(favorite)  # fresh instance
-            return Response({"success": True, "message": "ফেভারিটে যোগ করা হয়েছে", "is_favorite": True, "vendor": vendor_data})
-
+            return Response({"success": True, "message": "Added to favorites", "is_favorite": True, "vendor": vendor_data})
 # My Favorite Vendors
 class MyFavoriteVendorsAPI(APIView):
     permission_classes = [IsAuthenticated]
@@ -534,7 +532,7 @@ class MyFavoriteVendorsAPI(APIView):
     def get(self, request):
         profile = getattr(request.user, "profile", None)
         if not profile or not profile.latitude or not profile.longitude:
-            return Response({"success": False, "message": "তোমার প্রোফাইলে লোকেশন নেই। অনুগ্রহ করে আপডেট করো।"}, status=400)
+            return Response({"success": False, "message": "Your profile does not have location information. Please update it."}, status=400)
 
         user_lat, user_lng = profile.latitude, profile.longitude
         now = timezone.now()
@@ -588,7 +586,7 @@ class NearbyCampaignVendorsAPI(APIView):
     def get(self, request):
         profile = getattr(request.user, "profile", None)
         if not profile or not profile.latitude or not profile.longitude:
-            return Response({"success": False, "message": "প্রোফাইলে লোকেশন নেই। আপডেট করো।"}, status=400)
+            return Response({"success": False, "message": "Your profile does not have location information. Please update it."}, status=400)
         
         user_lat, user_lng = profile.latitude, profile.longitude
         max_distance_km = 5  # প্রয়োজনমতো পরিবর্তন করা যাবে
