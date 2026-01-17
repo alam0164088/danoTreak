@@ -43,22 +43,21 @@ jobs:
           python -m pytest -q
 
       # 6️⃣ Setup SSH and Deploy
+ # 6️⃣ Setup SSH and Deploy
       - name: Deploy to AWS via SSH
         env:
           SSH_PRIVATE_KEY: ${{ secrets.AWS_SSH_KEY }}
           SSH_HOST: ${{ secrets.AWS_HOST }}
           SSH_USER: ubuntu
         run: |
-          # SSH ফোল্ডার তৈরি এবং চাবি সেটআপ
           mkdir -p ~/.ssh
-          echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
+          # চাবিটি সঠিকভাবে রাইট করা এবং শেষে একটি নিউ লাইন নিশ্চিত করা
+          printf "%s\n" "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           
-          # সার্ভারকে Known Hosts-এ যুক্ত করা (যাতে প্রম্পট না আসে)
           ssh-keyscan -H $SSH_HOST >> ~/.ssh/known_hosts
           
-          # সার্ভারে কমান্ড এক্সিকিউট করা
-          ssh -i ~/.ssh/id_rsa $SSH_USER@$SSH_HOST "
+          ssh -i ~/.ssh/id_rsa -vvv $SSH_USER@$SSH_HOST "
             cd /home/ubuntu/danoTreak &&
             git pull origin main &&
             source env/bin/activate &&
