@@ -41,7 +41,8 @@ jobs:
       - name: Run tests
         run: |
           python -m pytest -q
-# 6️⃣ Setup SSH and Deploy
+
+      # 6️⃣ Setup SSH and Deploy
       - name: Deploy to AWS via SSH
         env:
           SSH_PRIVATE_KEY: ${{ secrets.AWS_SSH_KEY }}
@@ -49,18 +50,23 @@ jobs:
           SSH_USER: ubuntu
         run: |
           mkdir -p ~/.ssh
-          # কী ফাইলটি নিরাপদভাবে তৈরি করা
+          # SSH প্রাইভেট কী ফাইল তৈরি
           echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           
           # সার্ভারকে চেনার জন্য known_hosts এ যোগ করা
           ssh-keyscan -H $SSH_HOST >> ~/.ssh/known_hosts
           
-          # ডেপ্লয় কমান্ড রান করা
+          # টার্গেট সার্ভারে ডেপ্লয়মেন্ট কমান্ডগুলো রান করা
           ssh -i ~/.ssh/id_rsa $SSH_USER@$SSH_HOST "
             cd /home/ubuntu/danoTreak &&
+            git config pull.rebase false &&
+            git fetch --all &&
+            git reset --hard origin/main &&
             git pull origin main &&
             source venv/bin/activate &&
             pip install -r requirements.txt &&
+            python manage.py migrate --noinput &&
+            python manage.py collectstatic --noinput &&
             sudo systemctl restart gunicorn
           "
