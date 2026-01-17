@@ -1,4 +1,4 @@
-name: CI
+name: CI & Deploy
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
     branches: [ main ]
 
 jobs:
-  test:
+  test-and-deploy:
     runs-on: ubuntu-latest
 
     steps:
@@ -35,3 +35,20 @@ jobs:
       - name: Run tests
         run: |
           python -m pytest -q
+
+      - name: Setup SSH for deploy
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.AWS_SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ secrets.AWS_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Deploy to AWS EC2
+        run: |
+          ssh ${{ secrets.AWS_USER }}@${{ secrets.AWS_HOST }} "
+            cd /home/ubuntu/danoTreak-main &&
+            git pull &&
+            source env/bin/activate &&
+            pip install -r requirements.txt &&
+            sudo systemctl restart gunicorn
+          "
