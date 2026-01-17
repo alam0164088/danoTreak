@@ -11,13 +11,16 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # 1️⃣ Checkout code
       - uses: actions/checkout@v4
 
+      # 2️⃣ Setup Python
       - name: Setup Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
 
+      # 3️⃣ Cache pip
       - name: Cache pip
         uses: actions/cache@v4
         with:
@@ -26,16 +29,19 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pip-
 
+      # 4️⃣ Install dependencies
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
           python -m pip install pytest pytest-django
 
+      # 5️⃣ Run tests
       - name: Run tests
         run: |
           python -m pytest -q
 
+      # 6️⃣ Setup SSH for deploy
       - name: Setup SSH for deploy
         run: |
           mkdir -p ~/.ssh
@@ -43,9 +49,10 @@ jobs:
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H ${{ secrets.AWS_HOST }} >> ~/.ssh/known_hosts
 
-      - name: Deploy to AWS EC2
+      # 7️⃣ Deploy to AWS
+      - name: Deploy to AWS
         run: |
-          ssh ${{ secrets.AWS_USER }}@${{ secrets.AWS_HOST }} "
+          ssh -o StrictHostKeyChecking=no ubuntu@${{ secrets.AWS_HOST }} "
             cd /home/ubuntu/danoTreak-main &&
             git pull &&
             source env/bin/activate &&
