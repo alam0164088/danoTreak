@@ -12,7 +12,8 @@ jobs:
 
     steps:
       # 1️⃣ Checkout code
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
       # 2️⃣ Setup Python
       - name: Setup Python
@@ -41,23 +42,26 @@ jobs:
         run: |
           python -m pytest -q
 
-      # 6️⃣ Setup SSH for deploy
-      - name: Setup SSH for deploy
+      # 6️⃣ Setup SSH and Deploy
+      - name: Deploy to AWS via SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.AWS_SSH_KEY }}
+          SSH_HOST: ${{ secrets.AWS_HOST }}
+          SSH_USER: ubuntu
         run: |
+          # SSH ফোল্ডার তৈরি এবং চাবি সেটআপ
           mkdir -p ~/.ssh
-          echo "${{ secrets.AWS_SSH_KEY }}" > ~/.ssh/id_rsa
+          echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan -H ${{ secrets.AWS_HOST }} >> ~/.ssh/known_hosts
-
-      # 7️⃣ Deploy to AWS
-      - name: Deploy to AWS
-        run: |
-          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no ubuntu@${{ secrets.AWS_HOST }} "
+          
+          # সার্ভারকে Known Hosts-এ যুক্ত করা (যাতে প্রম্পট না আসে)
+          ssh-keyscan -H $SSH_HOST >> ~/.ssh/known_hosts
+          
+          # সার্ভারে কমান্ড এক্সিকিউট করা
+          ssh -i ~/.ssh/id_rsa $SSH_USER@$SSH_HOST "
             cd /home/ubuntu/danoTreak &&
-            git pull &&
+            git pull origin main &&
             source env/bin/activate &&
             pip install -r requirements.txt &&
             sudo systemctl restart gunicorn
           "
-
-
