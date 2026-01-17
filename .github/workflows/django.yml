@@ -43,7 +43,6 @@ jobs:
           python -m pytest -q
 
       # 6️⃣ Setup SSH and Deploy
- # 6️⃣ Setup SSH and Deploy
       - name: Deploy to AWS via SSH
         env:
           SSH_PRIVATE_KEY: ${{ secrets.AWS_SSH_KEY }}
@@ -51,13 +50,21 @@ jobs:
           SSH_USER: ubuntu
         run: |
           mkdir -p ~/.ssh
-          # চাবিটি সঠিকভাবে রাইট করা এবং শেষে একটি নিউ লাইন নিশ্চিত করা
-          printf "%s\n" "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
+          # কী ফাইল তৈরি করা
+          printf "%s" "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           
+          # গুরুত্বপূর্ণ: পুরনো RSA কী সাপোর্ট করার জন্য কনফিগ সেট করা
+          echo "Host *" > ~/.ssh/config
+          echo "    PubkeyAcceptedKeyTypes +ssh-rsa" >> ~/.ssh/config
+          echo "    HostKeyAlgorithms +ssh-rsa" >> ~/.ssh/config
+          echo "    StrictHostKeyChecking no" >> ~/.ssh/config
+          
+          # সার্ভার আইপি স্ক্যান করা
           ssh-keyscan -H $SSH_HOST >> ~/.ssh/known_hosts
           
-          ssh -i ~/.ssh/id_rsa -vvv $SSH_USER@$SSH_HOST "
+          # ডেপ্লয় কমান্ড রান করা
+          ssh -i ~/.ssh/id_rsa $SSH_USER@$SSH_HOST "
             cd /home/ubuntu/danoTreak &&
             git pull origin main &&
             source env/bin/activate &&
