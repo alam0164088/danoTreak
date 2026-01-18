@@ -1,32 +1,49 @@
 import requests
+import hashlib
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-from .permissions import IsUser  # তোমার permission ফাইল থেকে import কর
+from rest_framework.throttling import UserRateThrottle
+from django.core.cache import cache
+from .permissions import IsUser
 from authentication.models import Vendor
 import math
+import uuid
+import time
 
 # ===============================
-# Haversine distance (DB vendors distance গণনার জন্য)
+# Haversine distance
 # ===============================
 def haversine_distance(lat1, lon1, lat2, lon2):
-    R = 6371  # পৃথিবীর ব্যাসার্ধ (কিমি)
+    R = 6371
     lat1, lon1, lat2, lon2 = map(float, [lat1, lon1, lat2, lon2])
     lat1, lon1, lat2, lon2 = map(math.radians, [lat1, lon1, lat2, lon2])
     dlat = lat2 - lat1
     dlon = lon2 - lon1
     a = math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2) ** 2
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-    return R * c * 1000  # মিটারে কনভার্ট
+    return R * c * 1000
 
-# ===============================
-# AI সার্ভার URL
-# ===============================
 BASE_AI_URL = "http://10.10.7.82:8005"
 
-# ===============================
-# Helper: Get user location
-# ===============================
+_ai_cache = {"online": None, "checked_at": 0}
+
+def is_ai_online():
+    """AI সার্ভার অনলাইন কিনা চেক (30 সেকেন্ড cache)"""
+    now = time.time()
+    if _ai_cache["online"] is not None and (now - _ai_cache["checked_at"]) < 30:
+        return _ai_cache["online"]
+    
+    try:
+        r = requests.get(f"{BASE_AI_URL}/", timeout=2)
+        online = r.status_code < 500
+    except:
+        online = False
+    
+    _ai_cache["online"] = online
+    _ai_cache["checked_at"] = now
+    return online
+
 def get_user_location(request):
     try:
         profile = request.user.profile
@@ -39,25 +56,50 @@ def get_user_location(request):
         return None, None
 
 # ===============================
-# Helper: Call AI API
+# ✅ Cache Key Generator (FIXED)
 # ===============================
-def call_ai_api(endpoint, payload, token):
-    """
-    AI সার্ভারে POST request পাঠানোর helper
-    """
+def get_cache_key(endpoint, payload):
+    """Location + category + user_input ভিত্তিক cache key (100m precision)"""
+    lat = round(payload.get('latitude', 0), 3)  # 0.001° ≈ 111m
+    lng = round(payload.get('longitude', 0), 3)
+    category = payload.get('category', '')
+    user_input = payload.get('user_input', '')[:50]  # first 50 chars
+    
+    key_str = f"{endpoint}:{category}:{user_input}:{lat}:{lng}"
+    return f"ai:{hashlib.md5(key_str.encode()).hexdigest()}"
+
+# ===============================
+# ✅ AI API Call with Cache (10 min)
+# ===============================
+def call_ai_api(endpoint, payload, token, timeout=100):  # default timeout 100 করা হলো
+    """AI সার্ভারে POST request with 10 min cache"""
+    cache_key = get_cache_key(endpoint, payload)
+    
+    # Cache check
+    cached = cache.get(cache_key)
+    if cached:
+        return cached, 200
+    
     try:
         headers = {}
         if token:
             headers["Authorization"] = f"Bearer {token}"
         url = f"{BASE_AI_URL}{endpoint}"
-        r = requests.post(url, json=payload, headers=headers, timeout=1000)
-        return r.json(), r.status_code
+        r = requests.post(url, json=payload, headers=headers, timeout=timeout)
+        data = r.json()
+        
+        # Success হলে 10 মিনিট cache
+        if r.status_code == 200 and data:
+            cache.set(cache_key, data, timeout=600)  # 10 min
+        
+        return data, r.status_code
+    except requests.Timeout:
+        return {"error": "AI server timeout"}, 504
+    except requests.ConnectionError:
+        return {"error": "AI server offline"}, 503
     except Exception as e:
         return {"error": str(e)}, 500
 
-# ===============================
-# Category mapping
-# ===============================
 CATEGORY_KEY_MAP = {
     "place": "places",
     "restaurant": "restaurants",
@@ -65,21 +107,26 @@ CATEGORY_KEY_MAP = {
     "lodging": "lodging",
     "activities": "activities",
 }
-import uuid 
+
 # ===============================
-# API: Get nearby vendors (DB + AI)
+# Throttle for AI requests
+# ===============================
+class AIThrottle(UserRateThrottle):
+    rate = '15/minute'
+
+# ===============================
+# ✅ Category Nearby API (OPTIMIZED)
 # ===============================
 class CategoryNearbyAI(APIView):
     permission_classes = [IsUser]
+    throttle_classes = [AIThrottle]
     ALLOWED_CATEGORIES = ["place", "restaurant", "beverage", "lodging", "activities"]
 
     def post(self, request):
-        # ইউজারের লোকেশন
         user_lat, user_lng = get_user_location(request)
         if not user_lat or not user_lng:
-            return Response({"success": False, "message": "লোকেশন পাওয়া যায়নি। প্রোফাইল আপডেট করুন।"}, status=400)
+            return Response({"success": False, "message": "লোকেশন পাওয়া যায়নি। প্রোফাইল আপডেট করুন।"}, status=400)
 
-        # Category validation
         category = request.data.get("category", "").lower().strip()
         if category not in self.ALLOWED_CATEGORIES:
             return Response({
@@ -89,25 +136,23 @@ class CategoryNearbyAI(APIView):
 
         vendors_list = []
 
-        # ===============================
-        # DB vendors
-        # ===============================
+        # ✅ DB vendors (always fresh)
         db_vendors = Vendor.objects.filter(
             is_profile_complete=True,
             latitude__isnull=False,
             longitude__isnull=False,
             category__iexact=category
-        )
+        ).select_related('user')
 
         for vendor in db_vendors:
             distance = haversine_distance(user_lat, user_lng, vendor.latitude, vendor.longitude)
             if distance <= 5000:
                 vendors_list.append({
-                    "id": vendor.id or str(uuid.uuid4()),  # <-- এখানে ঠিক করা হলো
+                    "id": vendor.id,
                     "vendor_name": vendor.vendor_name or "N/A",
                     "shop_name": vendor.shop_name or "N/A",
                     "phone_number": vendor.phone_number or "N/A",
-                    "email": vendor.user.email if hasattr(vendor, 'user') and vendor.user else "N/A",
+                    "email": vendor.user.email if vendor.user else "N/A",
                     "shop_address": vendor.shop_address or "N/A",
                     "category": vendor.category or category,
                     "description": vendor.description or "",
@@ -116,142 +161,113 @@ class CategoryNearbyAI(APIView):
                     "review_count": vendor.review_count or 0,
                     "shop_images": vendor.shop_images or [],
                     "distance_meters": round(distance, 1),
-                    "location": {
-                        "latitude": vendor.latitude,
-                        "longitude": vendor.longitude
-                    },
+                    "location": {"latitude": float(vendor.latitude), "longitude": float(vendor.longitude)},
                     "source": "db"
                 })
 
+        # ✅ AI vendors (cached 10 min)
+        ai_info = {"status": "skipped"}
 
-        # ===============================
-        # AI vendors
-        # ===============================
-
-        try:
-            payload = {"category": category, "latitude": user_lat, "longitude": user_lng}
-            data, code = call_ai_api("/get_location", payload, request.auth)
-            
-            if data and isinstance(data, dict):
-                ai_items = data.get(CATEGORY_KEY_MAP.get(category, category), [])
+        if is_ai_online():
+            try:
+                payload = {"category": category, "latitude": user_lat, "longitude": user_lng}
+                data, code = call_ai_api("/get_location", payload, request.auth, timeout=100)  # timeout 100 করা হলো
                 
-                for ai in ai_items:
-                    # AI থেকে id না থাকলে UUID জেনারেট করো
-                    ai_id = ai.get("id")
-                    if not ai_id:  # None, null, "", False ইত্যাদি
-                        ai_id = str(uuid.uuid4())
+                if code == 200 and data and isinstance(data, dict):
+                    ai_items = data.get(CATEGORY_KEY_MAP.get(category, category), [])
+                    ai_info = {"status": "success", "count": len(ai_items)}
                     
-                    vendors_list.append({
-                        "id": ai_id,
-                        "vendor_name": ai.get("name") or "N/A",
-                        "shop_name": ai.get("name") or "N/A",
-                        "phone_number": ai.get("phone") or "Phone not available",
-                        "email": "",
-                        "shop_address": ai.get("address") or "No address available",
-                        "category": category,
-                        "description": ai.get("description") or "No description available",
-                        "activities": (
-                            ai.get("features", "").split(", ") 
-                            if ai.get("features") else []
-                        ),
-                        "rating": (
-                            float(str(ai.get("rating", "0")).split("/")[0]) 
-                            if ai.get("rating") else 0.0
-                        ),
-                        "review_count": ai.get("total_reviews", 0),
-                        "shop_images": [
-                            p.get("photo_url") for p in ai.get("photos", []) 
-                            if p.get("photo_url")
-                        ],
-                        "distance_meters": round(float(ai.get("distance_km", 0)) * 1000, 1),
-                        "location": {
-                            "latitude": ai.get("location", {}).get("lat", 0),
-                            "longitude": ai.get("location", {}).get("lng", 0)
-                        },
-                        "source": "ai"
-                    })
-        except Exception as e:
-            # AI API ফেল করলেও ভিউ ক্র্যাশ করবে না, শুধু লগ হবে
-            print("AI API error:", e)
-            # vendors_list খালি থাকবে, কিন্তু DB-এর ডাটা (যদি থাকে) রিটার্ন হবে
+                    for ai in ai_items:
+                        ai_id = ai.get("id") or str(uuid.uuid4())
+                        vendors_list.append({
+                            "id": ai_id,
+                            "vendor_name": ai.get("name") or "N/A",
+                            "shop_name": ai.get("name") or "N/A",
+                            "phone_number": ai.get("phone") or "Phone not available",
+                            "email": "",
+                            "shop_address": ai.get("address") or "No address available",
+                            "category": category,
+                            "description": ai.get("description") or "No description available",
+                            "activities": ai.get("features", "").split(", ") if ai.get("features") else [],
+                            "rating": float(str(ai.get("rating", "0")).split("/")[0]) if ai.get("rating") else 0.0,
+                            "review_count": ai.get("total_reviews", 0),
+                            "shop_images": [p.get("photo_url") for p in ai.get("photos", []) if p.get("photo_url")],
+                            "distance_meters": round(float(ai.get("distance_km", 0)) * 1000, 1),
+                            "location": {
+                                "latitude": ai.get("location", {}).get("lat", 0),
+                                "longitude": ai.get("location", {}).get("lng", 0)
+                            },
+                            "source": "ai"
+                        })
+                else:
+                    ai_info = {"status": "error", "message": data.get("error", "Unknown")}
+            except Exception as e:
+                ai_info = {"status": "error", "message": str(e)}
+        else:
+            ai_info = {"status": "offline"}
 
-        # Sort: DB vendors first, then AI; within each group sort by distance (missing distance -> large)
-        vendors_list.sort(key=lambda x: (0 if x.get("source") == "db" else 1,
-                                         x.get("distance_meters", 1e9)))
+        # ✅ Sort: DB first, then AI by distance
+        vendors_list.sort(key=lambda x: (0 if x.get("source") == "db" else 1, x.get("distance_meters", 1e9)))
 
-        # অবশ্যই রিটার্ন করতে হবে (try-except এর বাইরে)
         return Response({
             "success": True,
             "your_location": {"lat": user_lat, "lng": user_lng},
             "search_radius_meters": 5000,
             "category": category,
             "total_found": len(vendors_list),
-            "vendors": vendors_list
+            "vendors": vendors_list,
+            "ai_server": ai_info
         }, status=200)
 
 
-
-
+# ===============================
+# Chat APIs (all cached)
+# ===============================
 class ChatNormalAPI(APIView):
     permission_classes = [IsUser]
+    throttle_classes = [AIThrottle]
 
     def post(self, request):
         token = request.auth
-        
         user_lat, user_lng = get_user_location(request)
         if not user_lat or not user_lng:
-            return Response({
-                "success": False,
-                "message": "location could not be found. Please update your profile."
-            }, status=400)
+            return Response({"success": False, "message": "location could not be found. Please update your profile."}, status=400)
 
-        message = request.data.get("message")  # ফ্রন্টএন্ড থেকে message নেওয়া
+        message = request.data.get("message")
         if not message:
-            return Response({"success": False, "message": "message প্রয়োজন"}, status=400)
+            return Response({"success": False, "message": "message প্রয়োজন"}, status=400)
 
-        final_payload = {
-            "user_input": message,   # AI সার্ভারের জন্য user_input ফিল্ডে পাঠানো হচ্ছে
-            "latitude": user_lat,
-            "longitude": user_lng
-        }
-
+        final_payload = {"user_input": message, "latitude": user_lat, "longitude": user_lng}
         data, code = call_ai_api("/chat/normal", final_payload, token)
         return Response(data, status=code)
 
 
 class ChatPlacesAPI(APIView):
     permission_classes = [IsUser]
+    throttle_classes = [AIThrottle]
 
     def post(self, request):
         token = request.auth
         user_lat, user_lng = get_user_location(request)
-
         if not user_lat or not user_lng:
             return Response({"success": False, "message": "location could not be found."}, status=400)
 
         message = request.data.get("message")
         if not message:
-            return Response({"success": False, "message": "message প্রয়োজন"}, status=400)
+            return Response({"success": False, "message": "message প্রয়োজন"}, status=400)
 
-        final_payload = {
-            "user_input": message,   # এখানে message কে user_input হিসেবে পাঠাচ্ছি
-            "latitude": user_lat,
-            "longitude": user_lng
-        }
-
+        final_payload = {"user_input": message, "latitude": user_lat, "longitude": user_lng}
         data, code = call_ai_api("/chat/places", final_payload, token)
         return Response(data, status=code)
-    
-
 
 
 class ChatRestaurantAPI(APIView):
     permission_classes = [IsUser]
+    throttle_classes = [AIThrottle]
 
     def post(self, request):
         token = request.auth
         user_lat, user_lng = get_user_location(request)
-
         if not user_lat or not user_lng:
             return Response({"success": False, "message": "location could not be found."}, status=400)
 
@@ -259,23 +275,18 @@ class ChatRestaurantAPI(APIView):
         if not message:
             return Response({"success": False, "message": "message required"}, status=400)
 
-        final_payload = {
-            "user_input": message,   # message কে user_input হিসেবে পাঠানো হচ্ছে
-            "latitude": user_lat,
-            "longitude": user_lng
-        }
-
+        final_payload = {"user_input": message, "latitude": user_lat, "longitude": user_lng}
         data, code = call_ai_api("/chat/restaurant", final_payload, token)
         return Response(data, status=code)
 
 
 class ChatBeverageAPI(APIView):
     permission_classes = [IsUser]
+    throttle_classes = [AIThrottle]
 
     def post(self, request):
         token = request.auth
         user_lat, user_lng = get_user_location(request)
-
         if not user_lat or not user_lng:
             return Response({"success": False, "message": "location could not be found."}, status=400)
 
@@ -283,46 +294,37 @@ class ChatBeverageAPI(APIView):
         if not message:
             return Response({"success": False, "message": "message required"}, status=400)
 
-        final_payload = {
-            "user_input": message,
-            "latitude": user_lat,
-            "longitude": user_lng
-        }
-
+        final_payload = {"user_input": message, "latitude": user_lat, "longitude": user_lng}
         data, code = call_ai_api("/chat/beverage", final_payload, token)
         return Response(data, status=code)
 
 
 class ChatLodgingAPI(APIView):
     permission_classes = [IsUser]
+    throttle_classes = [AIThrottle]
 
     def post(self, request):
         token = request.auth
         user_lat, user_lng = get_user_location(request)
-
         if not user_lat or not user_lng:
             return Response({"success": False, "message": "location could not be found."}, status=400)
 
         message = request.data.get("message")
         if not message:
             return Response({"success": False, "message": "message required"}, status=400)
-        final_payload = {
-            "user_input": message,
-            "latitude": user_lat,
-            "longitude": user_lng
-        }
 
+        final_payload = {"user_input": message, "latitude": user_lat, "longitude": user_lng}
         data, code = call_ai_api("/chat/lodging", final_payload, token)
         return Response(data, status=code)
 
 
 class ChatActivitiesAPI(APIView):
     permission_classes = [IsUser]
+    throttle_classes = [AIThrottle]
 
     def post(self, request):
         token = request.auth
         user_lat, user_lng = get_user_location(request)
-
         if not user_lat or not user_lng:
             return Response({"success": False, "message": "location could not be found."}, status=400)
 
@@ -330,84 +332,50 @@ class ChatActivitiesAPI(APIView):
         if not message:
             return Response({"success": False, "message": "message required"}, status=400)
 
-        final_payload = {
-            "user_input": message,
-            "latitude": user_lat,
-            "longitude": user_lng
-        }
-
+        final_payload = {"user_input": message, "latitude": user_lat, "longitude": user_lng}
         data, code = call_ai_api("/chat/activities", final_payload, token)
         return Response(data, status=code)
-    
+
 
 class ChatItineraryAPI(APIView):
     permission_classes = [IsUser]
+    throttle_classes = [AIThrottle]
 
     def post(self, request):
-        token = request.auth  # ফ্রন্টএন্ড থেকে access token
-
-        # ইউজারের লোকেশন ব্যাকএন্ড থেকে নেওয়া
+        token = request.auth
         user_lat, user_lng = get_user_location(request)
         if not user_lat or not user_lng:
-            return Response({
-                "success": False,
-                "message": "location could not be found. Please update your profile."
-            }, status=400)
+            return Response({"success": False, "message": "location could not be found. Please update your profile."}, status=400)
 
-        # ফ্রন্টএন্ড থেকে message ও preferences নাও
         message = request.data.get("message")
-        preferences = request.data.get("preferences", {})  # ডিফল্ট খালি ডিকশনারি
+        preferences = request.data.get("preferences", {})
 
         if not message:
             return Response({"success": False, "message": "message required"}, status=400)
 
-        # AI সার্ভারে পাঠানোর ফাইনাল পে-লোড
-        final_payload = {
-            "user_input": message,
-            "latitude": user_lat,
-            "longitude": user_lng,
-            "preferences": preferences  # ফ্রন্টএন্ড থেকে যেকোন অতিরিক্ত ডেটা
-        }
-
-        # AI সার্ভারে কল
+        final_payload = {"user_input": message, "latitude": user_lat, "longitude": user_lng, "preferences": preferences}
         data, code = call_ai_api("/chat/itinerary", final_payload, token)
-
-        # ফ্রন্টএন্ডকে AI এর রেসপন্স 그대로 পাঠাও
         return Response(data, status=code)
-    
+
 
 class GetLocationAPI(APIView):
     permission_classes = [IsUser]
+    throttle_classes = [AIThrottle]
 
     def post(self, request):
         token = getattr(request, 'auth', None)
         user_lat, user_lng = get_user_location(request)
 
         if user_lat is None or user_lng is None:
-            return Response({
-                "success": False,
-                "message": "location could not be found. Please update your profile."
-            }, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"success": False, "message": "location could not be found. Please update your profile."}, status=status.HTTP_400_BAD_REQUEST)
 
         category = request.data.get("category")
         if not category:
-            return Response({
-                "success": False,
-                "message": "category required"
-            }, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"success": False, "message": "category required"}, status=status.HTTP_400_BAD_REQUEST)
 
-        payload = {
-            "category": category,
-            "latitude": user_lat,
-            "longitude": user_lng
-        }
-
+        payload = {"category": category, "latitude": user_lat, "longitude": user_lng}
         data, code = call_ai_api("/get_location", payload, token)
         return Response(data, status=code)
-
-
-
-
 
 
 import math

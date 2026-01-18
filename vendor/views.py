@@ -13,6 +13,37 @@ from authentication.models import Vendor
 from .models import Campaign, Visitor, Visit, Redemption
 from .utils import generate_aliffited_id
 
+# vendor/views.py
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework.permissions import IsAuthenticated
+from authentication.permissions import IsAdmin
+from .models import Campaign, Redemption
+
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from django.db.models import Count
+from .models import Visitor, Campaign, Redemption
+
+# vendor/views.py
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework.permissions import IsAuthenticated
+from authentication.permissions import IsAdmin  # ← এখান থেকে ইমপোর্ট করুন
+from authentication.models import User, Vendor
+from .models import Campaign, Redemption
+
+    
+
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework.permissions import IsAuthenticated
+from authentication.permissions import IsAdmin
+from authentication.models import User, Vendor
+from .models import Campaign, Redemption, Visitor, Visit
+from django.db.models import Q
+
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
@@ -32,11 +63,7 @@ def dashboard_overview(request):
             campaign__vendor=vendor, status='redeemed'
         ).count()
     })
-from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import IsAuthenticated
-from rest_framework.response import Response
-from django.db.models import Count
-from .models import Visitor, Campaign, Redemption
+
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
@@ -52,21 +79,29 @@ def user_management(request):
         # active campaigns
         active_campaigns = Campaign.objects.filter(vendor=vendor, is_active=True)
 
+        # =========================
+        # active campaigns (reuse)
+        # =========================
+        active_campaigns = list(active_campaigns)  # force evaluation
+
+        # একবারে সব redeemed counts নিয়ে ম্যাপ বানানো (visitor_id, campaign_id) -> count
+        redemption_qs = Redemption.objects.filter(
+            visitor__in=visitors,
+            campaign__in=active_campaigns,
+            status='redeemed'
+        ).values('visitor_id', 'campaign_id').annotate(cnt=Count('id'))
+
+        redemption_map = {
+            (r['visitor_id'], r['campaign_id']): r['cnt'] for r in redemption_qs
+        }
+
         data = []
 
         for visitor in visitors:
             visitor_name = visitor.name or visitor.phone or "Anonymous"
 
             for campaign in active_campaigns:
-                # Redemption count
-                try:
-                    redemption_count = Redemption.objects.filter(
-                        visitor=visitor,
-                        campaign=campaign,
-                        status='redeemed'
-                    ).count()
-                except Exception:
-                    redemption_count = 0
+                redemption_count = redemption_map.get((visitor.id, campaign.id), 0)
 
                 # Eligible check
                 eligible = visitor.visit_count >= (campaign.required_visits or 0)
@@ -310,13 +345,7 @@ def confirm_redemption(request, redemption_id):
 
 
 
-# vendor/views.py
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
-from authentication.permissions import IsAdmin  # ← এখান থেকে ইমপোর্ট করুন
-from authentication.models import User, Vendor
-from .models import Campaign, Redemption
+
 
 class DashboardStatsView(APIView):
     permission_classes = [IsAuthenticated, IsAdmin]  # ← এটাই ঠিক করুন
@@ -334,15 +363,7 @@ class DashboardStatsView(APIView):
             "total_reward_redemptions": total_reward_redemptions,
         }
         return Response(data, status=200)
-    
 
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
-from authentication.permissions import IsAdmin
-from authentication.models import User, Vendor
-from .models import Campaign, Redemption, Visitor, Visit
-from django.db.models import Q
 
 
 class UserAndVendorListView(APIView):
@@ -409,6 +430,26 @@ class UserAndVendorListView(APIView):
                 aliffited_map[uid].append(r.aliffited_id)
 
         # =========================
+        # VISITS MAPPING (already computed above)
+        # =========================
+        # visited_vendors_map built earlier: user_id -> set(vendor_id)
+
+        # একবারে সব vendor-এর active campaigns নিয়ে ম্যাপ বানানো
+        vendor_ids_for_campaigns = set()
+        for s in visited_vendors_map.values():
+            vendor_ids_for_campaigns.update(s)
+
+        active_campaigns_by_vendor = {}
+        if vendor_ids_for_campaigns:
+            qs_campaigns = Campaign.objects.filter(
+                vendor__id__in=vendor_ids_for_campaigns,
+                is_active=True
+            ).values('vendor_id', 'name')
+
+            for c in qs_campaigns:
+                active_campaigns_by_vendor.setdefault(c['vendor_id'], []).append(c['name'])
+
+        # =========================
         # USER DATA
         # =========================
         user_data = []
@@ -416,18 +457,15 @@ class UserAndVendorListView(APIView):
             uid = u['id']
             visited_vendors = visited_vendors_map.get(uid, set())
 
-            active_campaigns = Campaign.objects.filter(vendor__id__in=visited_vendors,
-                is_active=True
-            ).values_list('name', flat=True)
-
-
-
-            
+            # vendor-wise campaigns -> flatten to unique list
+            user_active_campaigns = []
+            for vid in visited_vendors:
+                user_active_campaigns.extend(active_campaigns_by_vendor.get(vid, []))
 
             user_data.append({
                 **u,
                 "total_visits": visits_count_map.get(uid, 0),
-                "active_campaigns": list(active_campaigns),
+                "active_campaigns": list(dict.fromkeys(user_active_campaigns)),  # unique preserve order
                 "aliffited_ids": aliffited_map.get(uid, []),
                 "total_aliffited_ids": len(aliffited_map.get(uid, []))
             })
@@ -491,17 +529,6 @@ class UserAndVendorListView(APIView):
         }, status=200)
 
 
-    
-
-
-
-
-# vendor/views.py
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
-from authentication.permissions import IsAdmin
-from .models import Campaign, Redemption
 
 class CampaignRedemptionReportView(APIView):
     permission_classes = [IsAuthenticated, IsAdmin]

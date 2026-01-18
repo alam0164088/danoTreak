@@ -28,3 +28,8 @@ static/
 *.swp
 .DS_Store
 Thumbs.db
+
+# Ignore Django settings file
+myproject/settings.py
+# অথবা সব settings.py ignore করতে:
+**/settings.py

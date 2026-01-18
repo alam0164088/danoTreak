@@ -3,11 +3,11 @@ import websockets
 import json
 
 # =================== টোকেন ===================
-TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzk4NDAxNjQ5LCJpYXQiOjE3NjY4NjU2NDksImp0aSI6IjQ3YjAzYTVkOGUxYjRhY2I5MWU2ZjMyMTVkNjIwY2FiIiwidXNlcl9pZCI6IjE2MyJ9.q1gt1IahU1reY7KVhCtc-Fap0ol6b531ctiAzFABGn0"
+TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxODAwMjk3NTcyLCJpYXQiOjE3Njg3NjE1NzIsImp0aSI6Ijc1NDQxZDk0MTQ3YjQ5NGU5Yjc2ZTQ4NDIyZWY0NzY0IiwidXNlcl9pZCI6IjQifQ.63pPRU2uqcQxb7UDwNs_8VvYbd_xTXLOcpASNEgYlpM"
 
 
 # =================== WebSocket URL ===================
-WS_URL = f"ws://127.0.0.1:8000/ws/location/?token={TOKEN}"
+WS_URL = f"ws://127.0.0.1:8001/ws/location/?token={TOKEN}"
 
 # =================== লোকেশন ===================
 LATITUDE = 23.810331

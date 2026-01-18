@@ -1,24 +1,208 @@
 import json
+import os
+import re
+import uuid
+import math
+import logging
+import hashlib
+import requests
+from uuid import uuid4
+from datetime import timedelta, datetime
+from decimal import Decimal
+
+from django.conf import settings
+from django.core.mail import send_mail
+from django.core.files.base import ContentFile, File
+from django.core.files.storage import default_storage
+from django.shortcuts import get_object_or_404
+from django.utils import timezone
+from django.utils.timezone import localtime
+from django.http import HttpResponseRedirect, JsonResponse
+from django.views.decorators.cache import never_cache
+from django.utils.decorators import method_decorator
+from django.contrib.auth import get_user_model
+from django.core.exceptions import ObjectDoesNotExist
+from django.db import transaction
+
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status, serializers
+from rest_framework.permissions import IsAuthenticated, AllowAny
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
+
+from rest_framework_simplejwt.tokens import RefreshToken
+
+from jose import jwt as jose_jwt
+import jwt as pyjwt
+
+from asgiref.sync import async_to_sync
+from channels.layers import get_channel_layer
+
+from authentication.models import (
+    Token, Profile, PasswordResetSession, Vendor, VendorProfileUpdateRequest, Notification
+)
+from authentication.serializers import (
+    RegisterSerializer, SendOTPSerializer, VerifyOTPSerializer, LoginSerializer,
+    RefreshTokenSerializer, LogoutSerializer, ForgotPasswordSerializer,
+    VerifyResetOTPSerializer, ResetPasswordSerializer, ChangePasswordSerializer,
+    Enable2FASerializer, Verify2FASerializer, ResendOTPSerializer, UserProfileSerializer,
+    ProfileUpdateSerializer, VendorSerializer, ReferralCodeSerializer
+)
+from authentication.permissions import IsAdmin, IsVendor
+from authentication.consumers import ONLINE_USERS
+
+from vendor.models import Visitor, Visit, Campaign, Redemption
+from vendor.utils import generate_aliffited_id
+
+logger = logging.getLogger('authentication')
+User = get_user_model()
+
+# Notification serializer + API (moved up; no duplicates)
+class NotificationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Notification
+        fields = ["id", "title", "message", "aliffited_id", "shop_name", "reward_name", "is_read", "created_at"]
+
+class NotificationListAPI(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        qs = Notification.objects.filter(user=request.user).order_by("-created_at")
+        serializer = NotificationSerializer(qs, many=True)
+        return Response({
+            "success": True,
+            "count": qs.count(),
+            "notifications": serializer.data
+        })
+
+# ============= GOOGLE & APPLE LOGIN VIEWS (ফাইনাল ভার্সন – ইমেজ সমস্যা ১০০% ঠিক) =============
+from urllib.parse import unquote
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework.permissions import AllowAny
+from rest_framework_simplejwt.tokens import RefreshToken
+from django.utils import timezone
+from django.conf import settings
+from django.core.files.base import ContentFile
+from datetime import timedelta
+import requests
+import logging
+import hashlib
+import jwt
+
+from django.contrib.auth import get_user_model
+from .models import Token, Profile
+
+User = get_user_model()
+logger = logging.getLogger(__name__)
+
+from .serializers import ReferralCodeSerializer
+from django.conf import settings
+
+
+# ============================
+# VENDOR PROFILE COMPLETION
+import uuid
+import re
+from decimal import Decimal
+from django.core.files.storage import default_storage
+from django.core.exceptions import ObjectDoesNotExist
+from rest_framework.views import APIView
+from rest_framework.parsers import MultiPartParser, FormParser
+from rest_framework.response import Response
+from rest_framework.permissions import IsAuthenticated
+from rest_framework import status
+
+
+
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-from rest_framework.permissions import IsAuthenticated, AllowAny
-from rest_framework_simplejwt.tokens import RefreshToken
+from django.contrib.auth import get_user_model
+from rest_framework.permissions import AllowAny
+
+User = get_user_model()
+import os
+import uuid
+from django.core.files.storage import default_storage
+from django.core.files.base import ContentFile
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
+from rest_framework.permissions import IsAuthenticated
+
+
+
+
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework.permissions import IsAuthenticated
+from django.utils import timezone
+from datetime import timedelta
+
+
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework import status
+from django.shortcuts import get_object_or_404
+from django.utils import timezone
+from django.utils.timezone import localtime
 from django.core.mail import send_mail
 from django.conf import settings
-from django.utils import timezone
-from django.contrib.auth import get_user_model
-from django.views.decorators.cache import never_cache
-from django.utils.decorators import method_decorator
-import logging
-from uuid import uuid4
-from django.db import models
-from rest_framework.decorators import api_view
-from jose import jwt
-import requests
+from django.core.files import File
 import os
-import re
-from .models import VendorProfileUpdateRequest  # or from the correct app
+import logging
+
+from authentication.models import User, VendorProfileUpdateRequest
+
+logger = logging.getLogger(__name__)
+
+
+
+# views.py
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework.permissions import IsAuthenticated   # ← এই লাইনটা থাকতে হবে
+from .models import Vendor
+import math
+
+import math
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from authentication.models import Vendor, Profile
+
+
+
+import math
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from authentication.models import Vendor
+
+
+
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework.permissions import IsAuthenticated
+from .models import Vendor
+
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework.permissions import IsAuthenticated
+from rest_framework import serializers
+from .models import Notification
+
+
+# authentication/views.py
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from authentication.consumers import ONLINE_USERS
+from authentication.models import Profile
+from datetime import datetime
 
 from datetime import timedelta
 from django.http import HttpResponseRedirect, JsonResponse
@@ -31,6 +215,7 @@ from .serializers import (
     Enable2FASerializer, Verify2FASerializer, ResendOTPSerializer, UserProfileSerializer,
     ProfileUpdateSerializer, VendorSerializer
 )
+
 
 logger = logging.getLogger('authentication')
 User = get_user_model()
@@ -678,26 +863,6 @@ class Verify2FAView(APIView):
 
 
 
-
-# authentication/views.py
-from django.db import transaction
-from django.views.decorators.cache import never_cache
-from django.utils.decorators import method_decorator
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework import status
-from rest_framework.permissions import IsAuthenticated
-from .models import Profile
-from .serializers import UserProfileSerializer, ProfileUpdateSerializer
-import logging
-from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
-from django.contrib.auth import get_user_model
-from django.core.files.storage import default_storage
-
-User = get_user_model()
-logger = logging.getLogger(__name__)
-
-
 @method_decorator(never_cache, name='dispatch')
 class MeView(APIView):
     permission_classes = [IsAuthenticated]
@@ -797,28 +962,6 @@ class ResendOTPView(APIView):
 
 
 
-
-
-# ============= GOOGLE & APPLE LOGIN VIEWS (ফাইনাল ভার্সন – ইমেজ সমস্যা ১০০% ঠিক) =============
-from urllib.parse import unquote
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework.permissions import AllowAny
-from rest_framework_simplejwt.tokens import RefreshToken
-from django.utils import timezone
-from django.conf import settings
-from django.core.files.base import ContentFile
-from datetime import timedelta
-import requests
-import logging
-import hashlib
-import jwt
-
-from django.contrib.auth import get_user_model
-from .models import Token, Profile
-
-User = get_user_model()
-logger = logging.getLogger(__name__)
 
 
 # Google Login URL দিবে
@@ -1042,12 +1185,6 @@ class AppleLoginView(APIView):
 
 
 
-
-
-
-from .serializers import ReferralCodeSerializer
-from django.conf import settings
-
 class MyReferralCodeView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -1063,162 +1200,150 @@ class MyReferralCodeView(APIView):
 
 
 
-# ============================
-# VENDOR PROFILE COMPLETION
-import uuid
-import re
-from decimal import Decimal
-from django.core.files.storage import default_storage
-from django.core.exceptions import ObjectDoesNotExist
-from rest_framework.views import APIView
-from rest_framework.parsers import MultiPartParser, FormParser
-from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
-from rest_framework import status
-
 
 class CompleteVendorProfileView(APIView):
     permission_classes = [IsAuthenticated]
-    parser_classes = [MultiPartParser, FormParser]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
 
-    # =========================
-    # GET PROFILE
-    # =========================
     def get(self, request):
-        if request.user.role != "vendor":
-            return Response({"success": False, "message": "Access denied"}, status=403)
+        """GET: ভেন্ডর প্রোফাইল দেখা"""
+        user = request.user
+        if user.role != 'vendor':
+            return Response({"success": False, "message": "Only vendors can view profile"}, status=403)
 
         try:
-            vendor = request.user.vendor_profile
+            vendor = Vendor.objects.get(user=user)
+        except Vendor.DoesNotExist:
+            return Response({"success": False, "message": "Vendor profile not found"}, status=404)
 
-            return Response({
-                "success": True,
-                "profile_complete": vendor.is_profile_complete,
-                "vendor": {
-                    "vendor_name": vendor.vendor_name or "",
-                    "shop_name": vendor.shop_name or "",
-                    "phone_number": vendor.phone_number or "",
-                    "shop_address": vendor.shop_address or "",
-                    "category": vendor.category or "",
-                    "latitude": float(vendor.latitude) if vendor.latitude else None,
-                    "longitude": float(vendor.longitude) if vendor.longitude else None,
-                    "shop_images": vendor.shop_images or [],
-                    "description": vendor.description or "",
-                    "activities": vendor.activities or [],
-                    "rating": float(vendor.rating),
-                    "review_count": vendor.review_count,
-                }
-            }, status=200)
+        # Shop images এ base URL যোগ করা
+        base_url = request.build_absolute_uri('/')[:-1]  # trailing slash বাদ
+        shop_images_full = []
+        if vendor.shop_images:
+            for img in vendor.shop_images:
+                if img.startswith('http'):
+                    shop_images_full.append(img)
+                else:
+                    shop_images_full.append(f"{base_url}{img}")
 
-        except ObjectDoesNotExist:
-            return Response({
-                "success": True,
-                "profile_complete": False,
-                "message": "প্রোফাইল তৈরি করুন",
-                "vendor": {
-                    "shop_images": [],
-                    "activities": [],
-                    "description": ""
-                }
-            }, status=200)
+        return Response({
+            "success": True,
+            "profile_complete": vendor.is_profile_complete,
+            "vendor": {
+                "id": vendor.id,
+                "vendor_name": vendor.vendor_name or "",
+                "shop_name": vendor.shop_name or "",
+                "phone_number": vendor.phone_number or "",
+                "shop_address": vendor.shop_address or "",
+                "category": vendor.category or "",
+                "latitude": float(vendor.latitude) if vendor.latitude else None,
+                "longitude": float(vendor.longitude) if vendor.longitude else None,
+                "shop_images": shop_images_full,
+                "description": vendor.description or "",
+                "activities": vendor.activities or [],
+                "rating": float(vendor.rating) if vendor.rating else 0.0,
+                "review_count": vendor.review_count or 0,
+                "nid_front": request.build_absolute_uri(vendor.nid_front.url) if vendor.nid_front else None,
+                "nid_back": request.build_absolute_uri(vendor.nid_back.url) if vendor.nid_back else None,
+                "trade_license": request.build_absolute_uri(vendor.trade_license.url) if vendor.trade_license else None,
+            }
+        }, status=200)
 
-    # =========================
-    # POST / UPDATE PROFILE
-    # =========================
     def post(self, request):
-        if request.user.role != "vendor":
-            return Response({"success": False, "message": "Access denied"}, status=403)
+        user = request.user
+        if user.role != 'vendor':
+            return Response({"success": False, "message": "Only vendors can complete profile"}, status=403)
 
         try:
-            vendor = request.user.vendor_profile
-        except ObjectDoesNotExist:
-            return Response({"success": False, "message": "প্রোফাইল পাওয়া যায়নি"}, status=404)
+            vendor = Vendor.objects.get(user=user)
+        except Vendor.DoesNotExist:
+            return Response({"success": False, "message": "Vendor profile not found"}, status=404)
 
         data = request.data
 
-        # =========================
-        # REQUIRED FIELDS
-        # =========================
-        required = [
-            "vendor_name", "shop_name", "phone_number",
-            "shop_address", "category", "latitude", "longitude"
-        ]
-        missing = [f for f in required if not data.get(f)]
-        if missing:
-            return Response({
-                "success": False,
-                "message": f"এই ফিল্ডগুলো দিন: {', '.join(missing)}"
-            }, status=400)
+        # Basic fields
+        vendor.vendor_name = data.get('vendor_name', vendor.vendor_name)
+        vendor.shop_name = data.get('shop_name', vendor.shop_name)
+        vendor.phone_number = data.get('phone_number', vendor.phone_number)
+        vendor.shop_address = data.get('shop_address', vendor.shop_address)
+        vendor.category = data.get('category', vendor.category)
+        vendor.description = data.get('description', vendor.description)
 
-        # =========================
-        # PHONE VALIDATION
-        # =========================
-        phone = str(data["phone_number"]).strip()
-        if phone.startswith("+880"):
-            phone = "0" + phone[4:]
+        # Location
+        if data.get('latitude'):
+            vendor.latitude = Decimal(str(data.get('latitude')))
+        if data.get('longitude'):
+            vendor.longitude = Decimal(str(data.get('longitude')))
 
-        if not re.match(r"^01[3-9]\d{8}$", phone):
-            return Response(
-                {"success": False, "message": "সঠিক মোবাইল নম্বর দিন"},
-                status=400
-            )
+        # Activities
+        activities = data.get('activities')
+        if activities:
+            if isinstance(activities, str):
+                try:
+                    activities = json.loads(activities)
+                except:
+                    activities = [a.strip() for a in activities.split(',')]
+            vendor.activities = activities
 
-        # =========================
-        # LAT / LNG
-        # =========================
-        try:
-            lat = Decimal(str(data["latitude"]))
-            lng = Decimal(str(data["longitude"]))
-        except:
-            return Response(
-                {"success": False, "message": "ল্যাটিটিউড ও লংগিটিউড সঠিক দিন"},
-                status=400
-            )
+        # Rating & Review Count
+        if data.get('rating') is not None:
+            try:
+                vendor.rating = float(data.get('rating'))
+            except (ValueError, TypeError):
+                pass
 
-        # =========================
-        # ACTIVITIES
-        # =========================
-        activities = vendor.activities or []
-        if "activities" in data:
-            acts = data.get("activities")
-            if isinstance(acts, str):
-                activities = [a.strip() for a in acts.split(",") if a.strip()]
-            elif isinstance(acts, list):
-                activities = [str(a).strip() for a in acts if str(a).strip()]
+        if data.get('review_count') is not None:
+            try:
+                vendor.review_count = int(data.get('review_count'))
+            except (ValueError, TypeError):
+                pass
 
-        # =========================
-        # SHOP IMAGES (MULTIPLE)
-        # =========================
-        images = request.FILES.getlist("shop_images")
+        # Shop Images
         shop_images = vendor.shop_images or []
-
-        if images:
-            for img in images:
-                ext = img.name.split(".")[-1]
-                filename = f"vendors/{vendor.user.id}/{uuid.uuid4().hex}.{ext}"
-                path = default_storage.save(filename, img)
-                shop_images.append(default_storage.url(path))
-
-        # =========================
-        # SAVE
-        # =========================
-        vendor.vendor_name = data["vendor_name"].strip()
-        vendor.shop_name = data["shop_name"].strip()
-        vendor.phone_number = phone
-        vendor.shop_address = data["shop_address"].strip()
-        vendor.category = data["category"]
-        vendor.latitude = lat
-        vendor.longitude = lng
-        vendor.description = data.get("description", "")
-        vendor.activities = activities
+        for key in request.FILES:
+            if key.startswith('shop_image'):
+                file = request.FILES[key]
+                ext = os.path.splitext(file.name)[1].lower()
+                filename = f"{uuid.uuid4().hex}{ext}"
+                path = f"vendors/{vendor.id}/{filename}"
+                saved_path = default_storage.save(path, file)
+                shop_images.append(f"/media/{saved_path}")
         vendor.shop_images = shop_images
+
+        # NID & Trade License
+        if request.FILES.get('nid_front'):
+            file = request.FILES['nid_front']
+            ext = os.path.splitext(file.name)[1].lower()
+            path = f"vendors/{vendor.id}/nid_front{ext}"
+            if vendor.nid_front and hasattr(vendor.nid_front, 'path'):
+                if os.path.exists(vendor.nid_front.path):
+                    os.remove(vendor.nid_front.path)  # Remove old file
+            vendor.nid_front.save(os.path.basename(file.name), file, save=True)
+
+        if request.FILES.get('nid_back'):
+            file = request.FILES['nid_back']
+            ext = os.path.splitext(file.name)[1].lower()
+            path = f"vendors/{vendor.id}/nid_back{ext}"
+            if vendor.nid_back and hasattr(vendor.nid_back, 'path'):
+                if os.path.exists(vendor.nid_back.path):
+                    os.remove(vendor.nid_back.path)  # Remove old file
+            vendor.nid_back.save(os.path.basename(file.name), file, save=True)
+
+        if request.FILES.get('trade_license'):
+            file = request.FILES['trade_license']
+            ext = os.path.splitext(file.name)[1].lower()
+            path = f"vendors/{vendor.id}/trade_license{ext}"
+            if vendor.trade_license and hasattr(vendor.trade_license, 'path'):
+                if os.path.exists(vendor.trade_license.path):
+                    os.remove(vendor.trade_license.path)  # Remove old file
+            vendor.trade_license.save(os.path.basename(file.name), file, save=True)
+
         vendor.is_profile_complete = True
         vendor.save()
 
         return Response({
             "success": True,
-            "profile_complete": True,
-            "message": "প্রোফাইল সফলভাবে আপডেট হয়েছে!",
+            "message": "Profile completed successfully!",
             "vendor": {
                 "vendor_name": vendor.vendor_name,
                 "shop_name": vendor.shop_name,
@@ -1235,15 +1360,8 @@ class CompleteVendorProfileView(APIView):
             }
         }, status=200)
 
-    
 
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework import status
-from django.contrib.auth import get_user_model
-from rest_framework.permissions import AllowAny
 
-User = get_user_model()
 
 class AllVendorsListView(APIView):
     permission_classes = [AllowAny]   # চাইলে IsAuthenticated করতে পারো
@@ -1287,14 +1405,9 @@ class AllVendorsListView(APIView):
 # authentication/views.py
 # authentication/views.py → VendorProfileUpdateRequestView (ফাইনাল + কাজ করা ভার্সন)
 
-import os
-import uuid
-from django.core.files.storage import default_storage
-from django.core.files.base import ContentFile
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework import status
-from rest_framework.permissions import IsAuthenticated
+
+
+
 class VendorProfileUpdateRequestView(APIView):
     permission_classes = [IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser]  # এটা না থাকলে ইমেজ + FormData কাজ করবে না!
@@ -1392,8 +1505,7 @@ class VendorProfileUpdateRequestView(APIView):
                     continue
                 filename = f"update_{uuid.uuid4().hex}{ext}"
                 path = default_storage.save(f'vendor_update_docs/shop_images/{filename}', ContentFile(file.read()))
-                full_url = request.build_absolute_uri(settings.MEDIA_URL + path)
-                uploaded_shop_images.append(full_url)
+                uploaded_shop_images.append(request.build_absolute_uri(settings.MEDIA_URL + path))
 
         # === রিকোয়েস্ট সেভ করা ===
         update_request = VendorProfileUpdateRequest.objects.create(
@@ -1451,11 +1563,6 @@ class VendorProfileUpdateRequestView(APIView):
 
 # views.py তে যোগ করো (Admin section এর কাছে)
 
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
-from django.utils import timezone
-from datetime import timedelta
 
 
 class AdminPendingVendorUpdateRequestsView(APIView):
@@ -1593,22 +1700,6 @@ class AdminPendingVendorUpdateRequestsView(APIView):
 # ADMIN PANEL: Vendor Management APIs (ফাইনাল, সাজানো-গোছানো ভার্সন)
 # =============================================================================
 
-from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import IsAuthenticated
-from rest_framework.response import Response
-from rest_framework import status
-from django.shortcuts import get_object_or_404
-from django.utils import timezone
-from django.utils.timezone import localtime
-from django.core.mail import send_mail
-from django.conf import settings
-from django.core.files import File
-import os
-import logging
-
-from authentication.models import User, VendorProfileUpdateRequest
-
-logger = logging.getLogger(__name__)
 
 
 # -----------------------------------------------------------------------------
@@ -1634,180 +1725,68 @@ def copy_uploaded_file(source_field, target_field):
 
 
 # =============================================================================
-# ১. ভেন্ডর রেজিস্ট্রেশন অনুমোদন → লগইন চালু করা
+# HELPER FUNCTIONS: Location parsing
 # =============================================================================
-@api_view(['POST'])
-@permission_classes([IsAuthenticated])
-def approve_vendor_registration(request, user_id):
-    """
-    এডমিন নতুন ভেন্ডরকে লগইনের অনুমতি দেয়
-    URL: POST /admin/approve-vendor/<int:user_id>/
-    """
-    if request.user.role != 'admin':
-        return Response({
-            "success": False,
-            "message": "Only admins can perform this action"
-        }, status=403)
-
+def _parse_coord(value):
+    """Safely convert Decimal/str/float to float or return None."""
+    if value is None:
+        return None
+    if isinstance(value, str) and value.strip().lower() in ('', 'null', 'none', 'undefined'):
+        return None
     try:
-        user = User.objects.get(id=user_id, role='vendor')
-    except User.DoesNotExist:
-        return Response({
-            "success": False,
-            "message": "No vendor found with this ID"
-        }, status=404)
-
-    if user.is_active:
-        return Response({
-            "success": False,
-            "message": "This vendor has already been approved"
-        }, status=400)
-
-  
-    user.is_active = True
-    user.save(update_fields=['is_active'])
-
-    # Send welcome email to vendor
-    try:
-        send_mail(
-            subject="Your vendor account has been approved!",
-            message=f"""Dear {user.full_name or 'vendor'},
-
-Your vendor account has been successfully approved.
-You can now log in and complete your shop profile.
-Email: {user.email}
-Login Link: {getattr(settings, 'FRONTEND_URL', 'https://yourapp.com')}/vendor/login
-
-Thank you,
-The Team""",
-            from_email=settings.DEFAULT_FROM_EMAIL,
-            recipient_list=[user.email],
-            fail_silently=True,
-        )
-    except Exception as e:
-        logger.warning(f"Approval email failed for {user.email}: {e}")
-
-    logger.info(f"Vendor registration approved → {user.email} by {request.user.email}")
-
-    return Response({
-        "success": True,
-        "message": f"vendor {user.email} has been successfully approved and can now log in."
-    }, status=200)
+        return float(value)
+    except Exception:
+        try:
+            return float(str(value).strip())
+        except Exception:
+            return None
 
 
-# =============================================================================
-# ২. ভেন্ডর প্রোফাইল আপডেট রিকোয়েস্ট অনুমোদন
-# =============================================================================
-@api_view(['POST'])
-@permission_classes([IsAuthenticated])
-def approve_vendor_update_request(request, request_id):
+def _get_location_from_request(request):
     """
-    এডমিন ভেন্ডরের প্রোফাইল আপডেট রিকোয়েস্ট অনুমোদন করে
-    URL: POST /admin/approve-update/<int:request_id>/
+    Extract (lat, lng) from:
+      1) JWT payload in request.auth (keys: latitude/longitude, lat/lng, user_lat/user_lng)
+      2) request.user.profile latitude/longitude
+    Returns (float_lat, float_lng) or (None, None)
     """
-    if request.user.role != 'admin':
-        return Response({"success": False, "message": "Only admins"}, status=403)
-
-    req = get_object_or_404(VendorProfileUpdateRequest, id=request_id, status='pending')
-    vendor = req.vendor
-
-    # টেক্সট ডাটা আপডেট
-    for field, value in (req.new_data or {}).items():
-        if hasattr(vendor, field):
-            setattr(vendor, field, value)
-
-    # ডকুমেন্ট কপি
-    copy_uploaded_file(req.nid_front, vendor.nid_front)
-    copy_uploaded_file(req.nid_back, vendor.nid_back)
-    copy_uploaded_file(req.trade_license, vendor.trade_license)
-
-    # দোকানের ছবি আপডেট (খুবই গুরুত্বপূর্ণ!)
-    if req.shop_images and isinstance(req.shop_images, list):
-        vendor.shop_images = req.shop_images
-
-    vendor.save()
-
-    # রিকোয়েস্ট স্ট্যাটাস
-    req.status = 'approved'
-    req.reviewed_by = request.user
-    req.reviewed_at = timezone.now()
-    req.save()
-
-    logger.info(f"Profile update approved → {vendor.user.email} by {request.user.email}")
-
-    return Response({
-        "success": True,
-        "message": "Vendor profile has been successfully updated!",
-        "vendor_email": vendor.user.email,
-        "shop_name": vendor.shop_name,
-        "total_shop_images": len(vendor.shop_images or []),
-        "approved_by": request.user.email,
-        "approved_at": localtime(req.reviewed_at).strftime("%d %b %Y, %I:%M %p")
-    }, status=200)
-
-
-# =============================================================================
-# ৩. ভেন্ডর প্রোফাইল আপডেট রিকোয়েস্ট রিজেক্ট
-# =============================================================================
-@api_view(['POST'])
-@permission_classes([IsAuthenticated])
-def reject_vendor_update_request(request, request_id):
-    
-    if request.user.role != 'admin':
-        return Response({"success": False, "message": "শুধুমাত্র এডমিন"}, status=403)
-
-    req = get_object_or_404(VendorProfileUpdateRequest, id=request_id, status='pending')
-    vendor = req.vendor
-
-    reason = request.data.get('reason', '').strip() or "No reason provided"
-
-    req.status = 'rejected'
-    req.reviewed_by = request.user
-    req.reviewed_at = timezone.now()
-    req.reason = reason
-    req.save()
-
-    # ভেন্ডরকে ইমেইল
+    # 1) Try token payload
     try:
-        send_mail(
-            subject="Profile Update Request Rejected",
-            message=f"""Dear {vendor.user.full_name or 'vendor'},
+        token = getattr(request, "auth", None)
+        if token:
+            token_str = token if isinstance(token, str) else str(token)
+            payload = {}
+            try:
+                payload = pyjwt.decode(token_str, settings.SECRET_KEY, algorithms=["HS256"], options={"verify_exp": False})
+            except Exception:
+                try:
+                    payload = jose_jwt.decode(token_str, settings.SECRET_KEY, algorithms=["HS256"], options={"verify_exp": False})
+                except Exception:
+                    payload = {}
 
-Your profile update request has been rejected.
+            lat = payload.get("latitude") or payload.get("lat") or payload.get("user_lat")
+            lng = payload.get("longitude") or payload.get("lng") or payload.get("user_lng")
+            plat = _parse_coord(lat)
+            plng = _parse_coord(lng)
+            if plat is not None and plng is not None:
+                return plat, plng
+    except Exception:
+        pass
 
-Reason: {reason}
-Please make the necessary corrections and submit the request again.
+    # 2) Fallback to profile
+    try:
+        profile = getattr(request.user, "profile", None)
+        if profile:
+            plat = _parse_coord(getattr(profile, "latitude", None))
+            plng = _parse_coord(getattr(profile, "longitude", None))
+            if plat is not None and plng is not None:
+                return plat, plng
+    except Exception:
+        pass
 
-Thank you,
-The Team""",
-            from_email=settings.DEFAULT_FROM_EMAIL,
-            recipient_list=[vendor.user.email],
-            fail_silently=True,
-        )
-    except Exception as e:
-        logger.warning(f"Rejection email failed: {e}")
-
-    logger.info(f"Update request rejected → {vendor.user.email} | Reason: {reason}")
-
-    return Response({
-        "success": True,
-        "message": "Request has been successfully rejected",
-        "reason": reason,
-        "rejected_by": request.user.email,
-        "rejected_at": localtime(req.reviewed_at).strftime("%d %b %Y, %I:%M %p")
-    }, status=200)
-
-
-# views.py
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated   # ← এই লাইনটা থাকতে হবে
-from .models import Vendor
-import math
+    return None, None
 
 
 def calculate_distance(lat1, lon1, lat2, lon2):
-    
     R = 6371  # Earth radius in km
     lat1, lon1, lat2, lon2 = map(math.radians, [lat1, lon1, lat2, lon2])
     dlat = lat2 - lat1
@@ -1817,37 +1796,26 @@ def calculate_distance(lat1, lon1, lat2, lon2):
     return R * c
 
 
-import math
-from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import IsAuthenticated
-from rest_framework.response import Response
-from authentication.models import Vendor, Profile
+
 
 def haversine_distance(lat1, lon1, lat2, lon2):
-    R = 6371  # পৃথিবীর ব্যাসার্ধ (কিলোমিটারে)
-    lat1, lon1, lat2, lon2 = map(math.radians, [float(lat1), float(lon1), float(lat2), float(lon2)])
+    R = 6371  # পৃথিবীর ব্যাসার্ধ (কিমি)
+    lat1, lon1, lat2, lon2 = map(float, [lat1, lon1, lat2, lon2])
+    lat1, lon1, lat2, lon2 = map(math.radians, [lat1, lon1, lat2, lon2])
     dlat = lat2 - lat1
     dlon = lon2 - lon1
-    a = math.sin(dlat / 2)**2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2)**2
+    a = math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2) ** 2
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-    distance_meters = R * c * 1000  # মিটারে কনভার্ট
-    return distance_meters
-
+    return R * c * 1000  # মিটারে কনভার্ট
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def user_nearby_vendors(request):
 
     # ===============================
-    # ইউজারের প্রোফাইল থেকে লোকেশন নেওয়া
+    # ইউজারের লোকেশন: token -> profile
     # ===============================
-    try:
-        profile = request.user.profile
-        user_lat = profile.latitude if hasattr(profile, 'latitude') else None
-        user_lng = profile.longitude if hasattr(profile, 'longitude') else None
-    except Profile.DoesNotExist:
-        user_lat = None
-        user_lng = None
+    user_lat, user_lng = _get_location_from_request(request)
 
     if user_lat is None or user_lng is None:
         return Response({
@@ -1910,12 +1878,6 @@ def user_nearby_vendors(request):
 
 
 
-import math
-from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import IsAuthenticated
-from rest_framework.response import Response
-from authentication.models import Vendor
-
 # Haversine distance
 def haversine_distance(lat1, lon1, lat2, lon2):
     R = 6371  # পৃথিবীর ব্যাসার্ধ (কিমি)
@@ -1933,54 +1895,33 @@ def category_nearby_vendors(request, category):  # এখানে category path
     # ===============================
     # ইউজারের প্রোফাইল থেকে লোকেশন নেওয়া
     # ===============================
-    try:
-        profile = request.user.profile
-        user_lat = getattr(profile, 'latitude', None)
-        user_lng = getattr(profile, 'longitude', None)
-    except:
-        user_lat = None
-        user_lng = None
-
+    user_lat, user_lng = _get_location_from_request(request)
     if user_lat is None or user_lng is None:
         return Response({
             "success": False,
-            "message": "Your profile does not have location information. Please update it."
+            "message": "Your profile does not have location information. Please update it.",
+            "debug": {
+                "profile_exists": bool(getattr(request.user, "profile", None))
+            }
         }, status=400)
 
-    # Vendors filter
-    vendors = Vendor.objects.filter(
-        is_profile_complete=True,
-        latitude__isnull=False,
-        longitude__isnull=False,
-        category__iexact=category.strip()
-    )
-
+    vendors = Vendor.objects.filter(is_profile_complete=True, latitude__isnull=False, longitude__isnull=False, category__iexact=category.strip())
     nearby_vendors = []
     for vendor in vendors:
-        distance = haversine_distance(user_lat, user_lng, vendor.latitude, vendor.longitude)
-        if distance <= 2000:
+        vlat = _parse_coord(vendor.latitude)
+        vlng = _parse_coord(vendor.longitude)
+        if vlat is None or vlng is None:
+            continue
+        distance_m = haversine_distance(user_lat, user_lng, vlat, vlng)
+        if distance_m <= 2000:
             nearby_vendors.append({
                 "id": vendor.id,
                 "vendor_name": vendor.vendor_name or "N/A",
                 "shop_name": vendor.shop_name or "N/A",
-                "phone_number": vendor.phone_number or "N/A",
-                "email": vendor.user.email if hasattr(vendor, 'user') and vendor.user else "N/A",
-                "shop_address": vendor.shop_address or "N/A",
-                "category": vendor.category or "others",
-                "description": vendor.description or "",
-                "activities": vendor.activities or [],
-                "rating": float(vendor.rating) if vendor.rating else 0.0,
-                "review_count": vendor.review_count or 0,
-                "shop_images": vendor.shop_images or [],
-                "distance_meters": round(distance, 1),
-                "location": {
-                    "latitude": str(vendor.latitude),
-                    "longitude": str(vendor.longitude)
-                }
+                "distance_meters": round(distance_m, 1),
+                "location": {"latitude": str(vendor.latitude), "longitude": str(vendor.longitude)}
             })
-
     nearby_vendors.sort(key=lambda x: x['distance_meters'])
-
     return Response({
         "success": True,
         "your_location": {"lat": user_lat, "lng": user_lng},
@@ -1997,10 +1938,6 @@ def category_nearby_vendors(request, category):  # এখানে category path
 
 # views.py এর শেষে যোগ করো
 
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
-from .models import Vendor
 
 class AdminAllVendorCredentialsView(APIView):
     permission_classes = [IsAuthenticated]
@@ -2033,11 +1970,6 @@ class AdminAllVendorCredentialsView(APIView):
 
 
 # authentication/views.py এর শেষে যোগ করো
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
-from rest_framework import serializers
-from .models import Notification
 
 class NotificationSerializer(serializers.ModelSerializer):
     class Meta:
@@ -2057,15 +1989,6 @@ class NotificationListAPI(APIView):
         })
 
 
-
-
-# authentication/views.py
-from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import IsAuthenticated
-from rest_framework.response import Response
-from authentication.consumers import ONLINE_USERS
-from authentication.models import Profile
-from datetime import datetime
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
@@ -2097,3 +2020,157 @@ def live_users_view(request):
         "live_users": live_users_data,
         "timestamp": datetime.now().strftime("%H:%M:%S")
     })
+# =============================================================================
+# ADMIN: Approve/Reject Vendor Update Request
+# =============================================================================
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def approve_vendor_update_request(request, request_id):
+    """Admin approves a vendor profile update request."""
+    if request.user.role != 'admin':
+        return Response({
+            "success": False,
+            "message": "Only admins can approve requests"
+        }, status=403)
+
+    try:
+        update_request = VendorProfileUpdateRequest.objects.get(id=request_id)
+    except VendorProfileUpdateRequest.DoesNotExist:
+        return Response({
+            "success": False,
+            "message": "Request not found"
+        }, status=404)
+
+    if update_request.status != 'pending':
+        return Response({
+            "success": False,
+            "message": f"Request already {update_request.status}"
+        }, status=400)
+
+    vendor = update_request.vendor
+    new_data = update_request.new_data or {}
+
+    # Apply changes to vendor profile
+    field_mapping = {
+        'vendor_name': 'vendor_name',
+        'shop_name': 'shop_name',
+        'phone_number': 'phone_number',
+        'shop_address': 'shop_address',
+        'category': 'category',
+        'description': 'description',
+        'activities': 'activities',
+        'latitude': 'latitude',
+        'longitude': 'longitude',
+        'rating': 'rating',
+        'review_count': 'review_count',
+    }
+
+    for key, attr in field_mapping.items():
+        if key in new_data:
+            value = new_data[key]
+            if key in ['latitude', 'longitude']:
+                try:
+                    value = Decimal(str(value))
+                except:
+                    continue
+            elif key == 'rating':
+                try:
+                    value = float(value)
+                except:
+                    continue
+            elif key == 'review_count':
+                try:
+                    value = int(value)
+                except:
+                    continue
+            setattr(vendor, attr, value)
+
+    # Add new shop images if any
+    if update_request.shop_images:
+        existing_images = vendor.shop_images or []
+        existing_images.extend(update_request.shop_images)
+        vendor.shop_images = existing_images
+
+    # Copy documents if provided
+    if update_request.nid_front:
+        copy_uploaded_file(update_request.nid_front, vendor.nid_front)
+    if update_request.nid_back:
+        copy_uploaded_file(update_request.nid_back, vendor.nid_back)
+    if update_request.trade_license:
+        copy_uploaded_file(update_request.trade_license, vendor.trade_license)
+
+    vendor.save()
+
+    # Update request status
+    update_request.status = 'approved'
+    update_request.reviewed_by = request.user
+    update_request.reviewed_at = timezone.now()
+    update_request.save()
+
+    # Send notification to vendor
+    try:
+        Notification.objects.create(
+            user=vendor.user,
+            title="প্রোফাইল আপডেট অনুমোদিত",
+            message="আপনার প্রোফাইল আপডেট রিকোয়েস্ট অনুমোদন করা হয়েছে।"
+        )
+    except:
+        pass
+
+    return Response({
+        "success": True,
+        "message": "Vendor profile update approved successfully",
+        "request_id": request_id,
+        "vendor_id": vendor.id,
+        "shop_name": vendor.shop_name
+    }, status=200)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def reject_vendor_update_request(request, request_id):
+    """Admin rejects a vendor profile update request."""
+    if request.user.role != 'admin':
+        return Response({
+            "success": False,
+            "message": "Only admins can reject requests"
+        }, status=403)
+
+    try:
+        update_request = VendorProfileUpdateRequest.objects.get(id=request_id)
+    except VendorProfileUpdateRequest.DoesNotExist:
+        return Response({
+            "success": False,
+            "message": "Request not found"
+        }, status=404)
+
+    if update_request.status != 'pending':
+        return Response({
+            "success": False,
+            "message": f"Request already {update_request.status}"
+        }, status=400)
+
+    reason = request.data.get('reason', 'No reason provided')
+
+    update_request.status = 'rejected'
+    update_request.reason = reason
+    update_request.reviewed_by = request.user
+    update_request.reviewed_at = timezone.now()
+    update_request.save()
+
+    # Send notification to vendor
+    try:
+        Notification.objects.create(
+            user=update_request.vendor.user,
+            title="প্রোফাইল আপডেট প্রত্যাখ্যাত",
+            message=f"আপনার প্রোফাইল আপডেট রিকোয়েস্ট প্রত্যাখ্যান করা হয়েছে। কারণ: {reason}"
+        )
+    except:
+        pass
+
+    return Response({
+        "success": True,
+        "message": "Vendor profile update rejected",
+        "request_id": request_id,
+        "reason": reason
+    }, status=200)
