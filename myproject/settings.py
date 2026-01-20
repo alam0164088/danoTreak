@@ -153,9 +153,11 @@ CSRF_TRUSTED_ORIGINS = [
 
 # ===================== GOOGLE AUTH =====================
 SOCIALACCOUNT_LOGIN_ON_GET = True
-GOOGLE_CLIENT_ID = env("GOOGLE_CLIENT_ID")
-GOOGLE_CLIENT_SECRET = env("GOOGLE_CLIENT_SECRET")
-GOOGLE_REDIRECT_URI = env("GOOGLE_REDIRECT_URI")
+# ===================== GOOGLE AUTH =====================
+SOCIALACCOUNT_LOGIN_ON_GET = True
+GOOGLE_CLIENT_ID = env("GOOGLE_CLIENT_ID", default="")
+GOOGLE_CLIENT_SECRET = env("GOOGLE_CLIENT_SECRET", default="")
+GOOGLE_REDIRECT_URI = env("GOOGLE_REDIRECT_URI", default="http://localhost:8000/api/auth/google/callback/")
 
 # ===================== CHANNELS =====================
 CHANNEL_LAYERS = {

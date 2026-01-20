@@ -6,6 +6,7 @@ import math
 import logging
 import hashlib
 import requests
+import time
 from uuid import uuid4
 from datetime import timedelta, datetime
 from decimal import Decimal
@@ -962,226 +963,6 @@ class ResendOTPView(APIView):
 
 
 
-
-
-# Google Login URL দিবে
-class GoogleLoginView(APIView):
-    permission_classes = [AllowAny]
-
-    def get(self, request):
-        auth_url = (
-            f"https://accounts.google.com/o/oauth2/v2/auth?"
-            f"client_id={settings.GOOGLE_CLIENT_ID}&"
-            f"redirect_uri={settings.GOOGLE_REDIRECT_URI}&"
-            f"response_type=code&"
-            f"scope=email%20profile%20openid&"
-            f"access_type=offline&prompt=consent"
-        )
-        return Response({"auth_url": auth_url})
-
-
-# Google Callback - লগইন সম্পূর্ণ (ইমেজ ১০০% আসবে!)
-class GoogleCallbackView(APIView):
-    permission_classes = [AllowAny]
-
-    def get(self, request):
-        code = request.GET.get('code')
-        if not code:
-            return Response({"error": "No code provided"}, status=400)
-
-        code = unquote(code)
-
-        try:
-            # Step 1: Token Exchange
-            token_response = requests.post(
-                "https://oauth2.googleapis.com/token",
-                data={
-                    "code": code,
-                    "client_id": settings.GOOGLE_CLIENT_ID,
-                    "client_secret": settings.GOOGLE_CLIENT_SECRET,
-                    "redirect_uri": settings.GOOGLE_REDIRECT_URI,
-                    "grant_type": "authorization_code",
-                },
-                timeout=10
-            )
-            token_data = token_response.json()
-            if "error" in token_data:
-                return Response({"error": token_data.get("error_description", "Token error")}, status=400)
-
-            access_token = token_data.get("access_token")
-            if not access_token:
-                return Response({"error": "Access token not received"}, status=400)
-
-            # Step 2: User Info
-            user_info = requests.get(
-                "https://www.googleapis.com/oauth2/v2/userinfo",
-                headers={"Authorization": f"Bearer {access_token}"},
-                timeout=10
-            ).json()
-
-            email = user_info.get("email")
-            if not email:
-                return Response({"error": "Email not received from Google"}, status=400)
-
-            # Step 3: User Create/Login
-            user, created = User.objects.get_or_create(
-                email=email,
-                defaults={
-                    "full_name": user_info.get("name", ""),
-                    "is_email_verified": True,
-                    "is_active": True,
-                }
-            )
-
-            if created:
-                user.set_unusable_password()
-                user.save()
-                Profile.objects.create(user=user)
-
-            if not user.full_name and user_info.get("name"):
-                user.full_name = user_info.get("name")
-                user.save()
-
-            # Step 4: প্রোফাইল পিকচার (ডিফল্ট হলেও ওভাররাইড হবে!)
-            profile, _ = Profile.objects.get_or_create(user=user)
-
-            # শর্ত: যদি কোনো ছবি না থাকে বা ডিফল্ট ছবি থাকে → নতুন করে সেভ করো
-            if not profile.image.name or 'default' in profile.image.name.lower():
-                picture_saved = False
-
-                # ১. Google ছবি দিলে
-                if user_info.get("picture"):
-                    try:
-                        img_data = requests.get(user_info["picture"], timeout=10).content
-                        profile.image.save(f"google_{user.id}.jpg", ContentFile(img_data), save=True)
-                        picture_saved = True
-                    except Exception as e:
-                        logger.warning(f"Google picture failed: {e}")
-
-                # ২. Google না দিলে → Gravatar
-                if not picture_saved:
-                    email_hash = hashlib.md5(user.email.strip().lower().encode()).hexdigest()
-                    gravatar_url = f"https://www.gravatar.com/avatar/{email_hash}?s=200&d=identicon&r=g"
-                    try:
-                        img_data = requests.get(gravatar_url, timeout=10).content
-                        profile.image.save(f"gravatar_{user.id}.jpg", ContentFile(img_data), save=True)
-                    except Exception as e:
-                        logger.warning(f"Gravatar failed: {e}")
-
-            # Step 5: JWT Token
-            refresh = RefreshToken.for_user(user)
-            Token.objects.update_or_create(
-                user=user,
-                defaults={
-                    "email": user.email,
-                    "refresh_token": str(refresh),
-                    "access_token": str(refresh.access_token),
-                    "refresh_token_expires_at": timezone.now() + timedelta(days=30),
-                    "access_token_expires_at": timezone.now() + timedelta(minutes=60),
-                }
-            )
-
-            # Final Response
-            return Response({
-                "success": True,
-                "access_token": str(refresh.access_token),
-                "refresh_token": str(refresh),
-                "user": {
-                    "id": user.id,
-                    "email": user.email,
-                    "full_name": user.full_name or "",
-                    "role": getattr(user, "role", "user"),
-                    "profile_picture": request.build_absolute_uri(profile.image.url) if profile.image else None
-                }
-            })
-
-        except Exception as e:
-            logger.error(f"Google login error: {e}")
-            import traceback
-            traceback.print_exc()
-            return Response({
-                "error": "Login failed",
-                "details": str(e)
-            }, status=500)
-
-# Apple Login (iOS থেকে id_token পাঠাবে)
-
-
-class AppleLoginView(APIView):
-    permission_classes = [AllowAny]
-
-    def post(self, request):
-        id_token = request.data.get("id_token")
-        full_name = request.data.get("full_name", "")
-
-        if not id_token:
-            return Response({"error": "id_token required"}, status=400)
-
-        try:
-            # ডেভেলপমেন্টে সব টোকেন accept করি (যেকোনো ফরম্যাট!)
-            decoded = jwt.decode(id_token, options={"verify_signature": False, "verify_exp": False})
-
-            # Apple-এর আসল টোকেনে 'sub' থাকে, ফেক JWT.io টোকেনে 'sub' না থেকে 'name' থাকে
-            apple_id = decoded.get("sub") or decoded.get("email", "unknown").split("@")[0]
-            email = decoded.get("email") or f"{apple_id}@privaterelay.appleid.com"
-
-            # নিশ্চিত করি ইমেইল আছে
-            if "@" not in email:
-                email = f"{apple_id}@privaterelay.appleid.com"
-
-            # ইউজার তৈরি/লগইন
-            user, created = User.objects.get_or_create(
-                email=email,
-                defaults={
-                    "full_name": full_name or decoded.get("name", "Apple User"),
-                    "is_email_verified": True,
-                    "is_active": True,
-                }
-            )
-
-            if created or not user.full_name:
-                user.full_name = full_name or decoded.get("name", "Apple User")
-                user.set_unusable_password()
-                user.save()
-                Profile.objects.get_or_create(user=user)
-
-            # প্রোফাইল পিক
-            profile = user.profile
-            if not profile.image.name or 'default' in profile.image.name.lower():
-                email_hash = hashlib.md5(email.lower().encode()).hexdigest()
-                gravatar_url = f"https://www.gravatar.com/avatar/{email_hash}?d=identicon&s=200"
-                try:
-                    img_data = requests.get(gravatar_url, timeout=10).content
-                    profile.image.save(f"apple_{user.id}.jpg", ContentFile(img_data), save=True)
-                except:
-                    pass
-
-            # JWT
-            refresh = RefreshToken.for_user(user)
-            Token.objects.update_or_create(
-                user=user,
-                defaults={
-                    "email": user.email,
-                    "refresh_token": str(refresh),
-                    "access_token": str(refresh.access_token),
-                }
-            )
-
-            return Response({
-                "success": True,
-                "access_token": str(refresh.access_token),
-                "refresh_token": str(refresh),
-                "user": {
-                    "id": user.id,
-                    "email": user.email,
-                    "full_name": user.full_name,
-                    "profile_picture": request.build_absolute_uri(profile.image.url) if profile.image else None
-                }
-            })
-
-        except Exception as e:
-            logger.error(f"Apple login failed: {e}")
-            return Response({"error": "Invalid token", "details": str(e)}, status=400)
 
 
 
@@ -2174,3 +1955,315 @@ def reject_vendor_update_request(request, request_id):
         "request_id": request_id,
         "reason": reason
     }, status=200)
+
+
+
+# google and apple login
+
+
+# ===============================
+# ✅ Helper Functions
+# ===============================
+def generate_unique_username(email):
+    """Email থেকে unique username তৈরি করুন"""
+    base_username = email.split("@")[0]
+    username = base_username
+    counter = 1
+    
+    while User.objects.filter(username=username).exists():
+        username = f"{base_username}{counter}"
+        counter += 1
+    
+    return username
+
+
+def random_username():
+    """Generate random Apple username"""
+    return "apple_" + "".join(random.choices(string.ascii_lowercase + string.digits, k=8))
+
+
+# ===============================
+# ✅ Google Login - আসল CallBack
+# ===============================
+class GoogleLoginView(APIView):
+    """Flutter থেকে Google token পাবে এবং verify করবে"""
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        id_token = request.data.get("id_token")  # Flutter থেকে আসবে
+        
+        if not id_token:
+            return Response({"error": "id_token is required"}, status=400)
+
+        try:
+            # Google Token Verify করুন
+            from google.auth.transport import requests as google_requests
+            from google.oauth2 import id_token
+            
+            request_obj = google_requests.Request()
+            payload = id_token.verify_oauth2_token(
+                id_token, 
+                request_obj, 
+                settings.GOOGLE_CLIENT_ID
+            )
+            
+            email = payload.get("email")
+            full_name = payload.get("name", "")
+            picture = payload.get("picture")
+            
+            if not email:
+                return Response({"error": "Email not found"}, status=400)
+
+            # User create/get
+            user, created = User.objects.get_or_create(
+                email=email,
+                defaults={
+                    "full_name": full_name,
+                    "is_email_verified": True,
+                    "is_active": True,
+                    "role": "user"
+                }
+                                             )
+
+            if created:
+                user.set_unusable_password()
+                user.save()
+
+            # Profile তৈরি করুন
+            profile, _ = Profile.objects.get_or_create(user=user)
+
+            # ছবি ডাউনলোড করুন (optional)
+            if picture and not profile.image.name:
+                try:
+                    img_response = requests.get(picture, timeout=10)
+                    if img_response.status_code == 200:
+                        filename = f"google_{user.id}_{int(time.time())}.jpg"
+                        profile.image.save(
+                            filename, 
+                            ContentFile(img_response.content), 
+                            save=True
+                        )
+                except:
+                    pass
+
+            # JWT Token তৈরি করুন
+            refresh = RefreshToken.for_user(user)
+            Token.objects.filter(user=user).delete()
+            token_obj = Token.objects.create(
+                user=user,
+                email=user.email,
+                refresh_token=str(refresh),
+                access_token=str(refresh.access_token),
+                refresh_token_expires_at=timezone.now() + timedelta(days=30),
+                access_token_expires_at=timezone.now() + timedelta(days=365),
+                revoked=False
+            )
+
+            return JsonResponse({
+                "success": True,
+                "created": created,
+                "refresh": str(refresh),
+                "access": str(refresh.access_token),
+                "user": {
+                    "id": user.id,
+                    "email": user.email,
+                    "full_name": user.full_name or "",
+                    "profile_image": request.build_absolute_uri(profile.image.url) if profile.image else None,
+                }
+            }, status=200)
+
+        except Exception as e:
+            logger.error(f"Google login error: {str(e)}", exc_info=True)
+            return JsonResponse({"error": f"Error: {str(e)}"}, status=500)
+
+
+# ===============================
+# ✅ Apple Login
+# ===============================
+class AppleLoginView(APIView):
+    """Flutter থেকে Apple identity token পাবে"""
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        id_token = request.data.get("id_token")
+        
+        if not id_token:
+            return Response({"error": "id_token is required"}, status=400)
+
+        try:
+            import jwt as pyjwt
+            
+            # Token decode (signature verify ছাড়া - development এ)
+            decoded = pyjwt.decode(
+                id_token,
+                options={"verify_signature": False}
+            )
+
+            email = decoded.get("email")
+            name = decoded.get("name", "")
+            apple_id = decoded.get("sub")
+
+            if not email:
+                return Response({"error": "Email not found"}, status=400)
+
+            # User create/get
+            user, created = User.objects.get_or_create(
+                email=email,
+                defaults={
+                    "full_name": name or "Apple User",
+                    "is_email_verified": True,
+                    "is_active": True,
+                    "role": "user"
+                }
+            )
+
+            if created:
+                user.set_unusable_password()
+                user.save()
+
+            # Profile তৈরি করুন
+            profile, _ = Profile.objects.get_or_create(user=user)
+
+            # Gravatar ছবি যোগ করুন
+            if not profile.image.name:
+                try:
+                    email_hash = hashlib.md5(email.lower().encode()).hexdigest()
+                    gravatar_url = f"https://www.gravatar.com/avatar/{email_hash}?s=200&d=identicon&r=g"
+                    img_response = requests.get(gravatar_url, timeout=10)
+                    if img_response.status_code == 200:
+                        filename = f"apple_{user.id}_{int(time.time())}.jpg"
+                        profile.image.save(filename, ContentFile(img_response.content), save=True)
+                except:
+                    pass
+
+            # JWT Token তৈরি করুন
+            refresh = RefreshToken.for_user(user)
+            Token.objects.filter(user=user).delete()
+            Token.objects.create(
+                user=user,
+                email=user.email,
+                refresh_token=str(refresh),
+                access_token=str(refresh.access_token),
+                refresh_token_expires_at=timezone.now() + timedelta(days=30),
+                access_token_expires_at=timezone.now() + timedelta(days=365),
+                revoked=False
+            )
+
+            logger.info(f"Apple login {'created' if created else 'logged in'}: {user.email}")
+
+            return Response({
+                "success": True,
+                "created": created,
+                "access_token": str(refresh.access_token),
+                "refresh_token": str(refresh),
+                "token_type": "Bearer",
+                "user": {
+                    "id": user.id,
+                    "email": user.email,
+                    "full_name": user.full_name or "",
+                    "role": user.role,
+                    "profile_picture": request.build_absolute_uri(profile.image.url) if profile.image else None,
+                }
+            }, status=200)
+
+        except Exception as e:
+            logger.error(f"Apple login failed: {e}", exc_info=True)
+            return Response({
+                "error": "Apple login failed",
+                "details": str(e)
+            }, status=500)
+
+from django.views.decorators.csrf import csrf_exempt
+from django.http import JsonResponse
+from django.views import View
+import json
+
+@csrf_exempt  # ✅ CSRF check disable (development এর জন্য)
+def google_login_view(request):
+    """Flutter থেকে Google ID Token পাবে"""
+    
+    if request.method != 'POST':
+        return JsonResponse({"error": "Only POST allowed"}, status=405)
+    
+    try:
+        data = json.loads(request.body)
+    except:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+
+    email = data.get("email")
+    full_name = data.get("full_name", "").strip()
+    photo_url = data.get("photo_url")
+
+    if not email:
+        return JsonResponse({"error": "Email is required"}, status=400)
+
+    try:
+        # User create/get (username ছাড়াই)
+        user, created = User.objects.get_or_create(
+            email=email,
+            defaults={
+                "full_name": full_name,
+                "is_active": True,
+                "is_email_verified": True,
+                "role": "user"
+            }
+        )
+
+        # Update name
+        if full_name:
+            parts = full_name.split(" ", 1)
+            user.first_name = parts[0]
+            user.last_name = parts[1] if len(parts) > 1 else ""
+            user.full_name = full_name
+            user.save()
+
+        # Set unusable password (Google login use করছে)
+        if created:
+            user.set_unusable_password()
+            user.save()
+
+        # Profile
+        profile, _ = Profile.objects.get_or_create(user=user)
+
+        # Download profile photo
+        if photo_url and not profile.image:
+            try:
+                res = requests.get(photo_url, timeout=10)
+                if res.status_code == 200:
+                    ext = photo_url.split(".")[-1].split("?")[0]
+                    ext = ext if ext.lower() in ["jpg", "jpeg", "png"] else "jpg"
+                    filename = f"google_{user.id}_{int(time.time())}.{ext}"
+                    profile.image.save(filename, ContentFile(res.content), save=False)
+                    profile.save()
+            except Exception as e:
+                logger.warning(f"Profile photo download failed: {e}")
+
+        # Tokens
+        refresh = RefreshToken.for_user(user)
+        Token.objects.filter(user=user).delete()
+        token_obj = Token.objects.create(
+            user=user,
+            email=user.email,
+            refresh_token=str(refresh),
+            access_token=str(refresh.access_token),
+            refresh_token_expires_at=timezone.now() + timedelta(days=30),
+            access_token_expires_at=timezone.now() + timedelta(days=365),
+            revoked=False
+        )
+
+        return JsonResponse({
+            "success": True,
+            "created": created,
+            "refresh": str(refresh),
+            "access": str(refresh.access_token),
+            "user": {
+                "id": user.id,
+                "email": user.email,
+                "full_name": user.full_name or "",
+                "profile_image": request.build_absolute_uri(profile.image.url) if profile.image else None,
+            }
+        }, status=200)
+
+    except Exception as e:
+        logger.error(f"Google login error: {str(e)}", exc_info=True)
+        return JsonResponse({"error": f"Login failed: {str(e)}"}, status=500)

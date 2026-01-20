@@ -12,11 +12,10 @@ from .views import (
     ForgotPasswordView, VerifyResetOTPView, ResetPasswordConfirmView,
     ChangePasswordView, Enable2FAView, Verify2FAView, MeView,
     ResendOTPView, MyReferralCodeView,
-    GoogleLoginView, GoogleCallbackView, AppleLoginView,
+    google_login_view,  # ✅ Function import করুন
+    AppleLoginView,
 )
 
-
-# সাধারণ view যেমন get_user_rewards
 
 urlpatterns = [
     # Live Users
@@ -61,13 +60,7 @@ urlpatterns = [
     path('resend-otp/', ResendOTPView.as_view(), name='resend_otp'),
     path('my-referral-code/', MyReferralCodeView.as_view(), name='my_referral_code'),
 
-    # Social Login
-    path('auth/google/login/', GoogleLoginView.as_view(), name='google_login'),
-    path('auth/google/callback/', GoogleCallbackView.as_view(), name='google_callback'),
+    # Social Login (Flutter থেকে POST)
+    path('auth/google/login/', google_login_view, name='google_login'),  # ✅ Function call
     path('auth/apple/login/', AppleLoginView.as_view(), name='apple_login'),
-
-    # Misc
-  
-   
-    
 ]
