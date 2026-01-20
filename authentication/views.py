@@ -2074,7 +2074,7 @@ class GoogleLoginView(APIView):
 
         except Exception as e:
             logger.error(f"Google login error: {str(e)}", exc_info=True)
-            return JsonResponse({"error": f"Error: {str(e)}"}, status=500)
+            return JsonResponse({"error": f"Login failed: {str(e)}"}, status=500)
 
 
 # ===============================
@@ -2086,46 +2086,61 @@ class AppleLoginView(APIView):
 
     def post(self, request):
         id_token = request.data.get("id_token")
+        email = request.data.get("email", "").strip().lower()  # ✅ Request থেকে নিন
+        full_name = request.data.get("full_name", "").strip()
         
         if not id_token:
             return Response({"error": "id_token is required"}, status=400)
 
+        if not email:
+            return Response({"error": "Email is required"}, status=400)
+
         try:
             import jwt as pyjwt
             
-            # Token decode (signature verify ছাড়া - development এ)
+            # Token decode
             decoded = pyjwt.decode(
                 id_token,
                 options={"verify_signature": False}
             )
 
-            email = decoded.get("email")
-            name = decoded.get("name", "")
             apple_id = decoded.get("sub")
 
-            if not email:
-                return Response({"error": "Email not found"}, status=400)
-
-            # User create/get
+            # User create/get (email normalize করে)
             user, created = User.objects.get_or_create(
-                email=email,
+                email=email,  # ✅ Normalized email
                 defaults={
-                    "full_name": name or "Apple User",
+                    "full_name": full_name or "Apple User",
                     "is_email_verified": True,
                     "is_active": True,
                     "role": "user"
                 }
             )
 
-            if created:
-                user.set_unusable_password()
+            # ✅ Always update profile info (even if user exists)
+            updated = False
+            if full_name and user.full_name != full_name:
+                parts = full_name.split(" ", 1)
+                user.first_name = parts[0]
+                user.last_name = parts[1] if len(parts) > 1 else ""
+                user.full_name = full_name
+                updated = True
+
+            # Update email if it changed
+            if user.email != email:
+                user.email = email
+                updated = True
+
+            if updated or created:
+                if created:
+                    user.set_unusable_password()
                 user.save()
 
             # Profile তৈরি করুন
             profile, _ = Profile.objects.get_or_create(user=user)
 
             # Gravatar ছবি যোগ করুন
-            if not profile.image.name:
+            if not profile.image or not profile.image.name:
                 try:
                     email_hash = hashlib.md5(email.lower().encode()).hexdigest()
                     gravatar_url = f"https://www.gravatar.com/avatar/{email_hash}?s=200&d=identicon&r=g"
@@ -2133,15 +2148,15 @@ class AppleLoginView(APIView):
                     if img_response.status_code == 200:
                         filename = f"apple_{user.id}_{int(time.time())}.jpg"
                         profile.image.save(filename, ContentFile(img_response.content), save=True)
-                except:
-                    pass
+                except Exception as e:
+                    logger.warning(f"Gravatar download failed: {e}")
 
             # JWT Token তৈরি করুন
             refresh = RefreshToken.for_user(user)
             Token.objects.filter(user=user).delete()
             Token.objects.create(
                 user=user,
-                email=user.email,
+                email=user.email,  # ✅ Updated email use করুন
                 refresh_token=str(refresh),
                 access_token=str(refresh.access_token),
                 refresh_token_expires_at=timezone.now() + timedelta(days=30),
@@ -2151,7 +2166,7 @@ class AppleLoginView(APIView):
 
             logger.info(f"Apple login {'created' if created else 'logged in'}: {user.email}")
 
-            return Response({
+            return JsonResponse({
                 "success": True,
                 "created": created,
                 "access_token": str(refresh.access_token),
@@ -2159,26 +2174,35 @@ class AppleLoginView(APIView):
                 "token_type": "Bearer",
                 "user": {
                     "id": user.id,
-                    "email": user.email,
+                    "email": user.email,  # ✅ Updated email
                     "full_name": user.full_name or "",
                     "role": user.role,
-                    "profile_picture": request.build_absolute_uri(profile.image.url) if profile.image else None,
+                    "profile_picture": request.build_absolute_uri(profile.image.url) if profile.image and profile.image.name else None,
                 }
             }, status=200)
 
         except Exception as e:
             logger.error(f"Apple login failed: {e}", exc_info=True)
-            return Response({
+            return JsonResponse({
                 "error": "Apple login failed",
                 "details": str(e)
             }, status=500)
 
 from django.views.decorators.csrf import csrf_exempt
 from django.http import JsonResponse
-from django.views import View
 import json
+import requests
+import time
+from django.core.files.base import ContentFile
+from django.utils import timezone
+from datetime import timedelta
+from rest_framework_simplejwt.tokens import RefreshToken
+from authentication.models import User, Profile, Token
+import logging
 
-@csrf_exempt  # ✅ CSRF check disable (development এর জন্য)
+logger = logging.getLogger(__name__)
+
+@csrf_exempt
 def google_login_view(request):
     """Flutter থেকে Google ID Token পাবে"""
     
@@ -2190,7 +2214,7 @@ def google_login_view(request):
     except:
         return JsonResponse({"error": "Invalid JSON"}, status=400)
 
-    email = data.get("email")
+    email = data.get("email", "").strip().lower()  # ✅ Normalize email
     full_name = data.get("full_name", "").strip()
     photo_url = data.get("photo_url")
 
@@ -2198,9 +2222,9 @@ def google_login_view(request):
         return JsonResponse({"error": "Email is required"}, status=400)
 
     try:
-        # User create/get (username ছাড়াই)
+        # User create/get by normalized email
         user, created = User.objects.get_or_create(
-            email=email,
+            email=email,  # ✅ Exact match হবে
             defaults={
                 "full_name": full_name,
                 "is_active": True,
@@ -2209,32 +2233,37 @@ def google_login_view(request):
             }
         )
 
-        # Update name
-        if full_name:
+        # ✅ Always update profile info (even if user exists)
+        updated = False
+        if full_name and user.full_name != full_name:
             parts = full_name.split(" ", 1)
             user.first_name = parts[0]
             user.last_name = parts[1] if len(parts) > 1 else ""
             user.full_name = full_name
-            user.save()
+            updated = True
 
-        # Set unusable password (Google login use করছে)
-        if created:
-            user.set_unusable_password()
+        # Update email if it changed
+        if user.email != email:
+            user.email = email
+            updated = True
+
+        if updated or created:
+            if created:
+                user.set_unusable_password()
             user.save()
 
         # Profile
         profile, _ = Profile.objects.get_or_create(user=user)
 
-        # Download profile photo
-        if photo_url and not profile.image:
+        # Download profile photo (only if no image exists)
+        if photo_url and (not profile.image or not profile.image.name):
             try:
                 res = requests.get(photo_url, timeout=10)
                 if res.status_code == 200:
                     ext = photo_url.split(".")[-1].split("?")[0]
                     ext = ext if ext.lower() in ["jpg", "jpeg", "png"] else "jpg"
                     filename = f"google_{user.id}_{int(time.time())}.{ext}"
-                    profile.image.save(filename, ContentFile(res.content), save=False)
-                    profile.save()
+                    profile.image.save(filename, ContentFile(res.content), save=True)
             except Exception as e:
                 logger.warning(f"Profile photo download failed: {e}")
 
@@ -2243,7 +2272,7 @@ def google_login_view(request):
         Token.objects.filter(user=user).delete()
         token_obj = Token.objects.create(
             user=user,
-            email=user.email,
+            email=user.email,  # ✅ Always use latest email
             refresh_token=str(refresh),
             access_token=str(refresh.access_token),
             refresh_token_expires_at=timezone.now() + timedelta(days=30),
@@ -2254,13 +2283,15 @@ def google_login_view(request):
         return JsonResponse({
             "success": True,
             "created": created,
-            "refresh": str(refresh),
-            "access": str(refresh.access_token),
+            "access_token": str(refresh.access_token),
+            "refresh_token": str(refresh),
+            "token_type": "Bearer",
             "user": {
                 "id": user.id,
-                "email": user.email,
+                "email": user.email,  # ✅ Updated email
                 "full_name": user.full_name or "",
-                "profile_image": request.build_absolute_uri(profile.image.url) if profile.image else None,
+                "role": user.role,
+                "profile_picture": request.build_absolute_uri(profile.image.url) if profile.image and profile.image.name else None,
             }
         }, status=200)
 
