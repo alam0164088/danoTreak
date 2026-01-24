@@ -10,6 +10,8 @@ from authentication.models import Vendor
 import math
 import uuid
 import time
+import logging
+logger = logging.getLogger(__name__)
 
 # ===============================
 # Haversine distance
@@ -24,7 +26,7 @@ def haversine_distance(lat1, lon1, lat2, lon2):
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
     return R * c * 1000
 
-BASE_AI_URL = "http://3.19.225.124:8005/docs"
+BASE_AI_URL = "http://3.19.225.124:8005"  # use API base (not /docs)
 
 _ai_cache = {"online": None, "checked_at": 0}
 
@@ -36,8 +38,9 @@ def is_ai_online():
     
     try:
         r = requests.get(f"{BASE_AI_URL}/", timeout=2)
-        online = r.status_code < 500
-    except:
+        online = r.status_code == 200 or (200 <= r.status_code < 400)
+    except Exception as e:
+        logger.warning("AI health check failed: %s", e)
         online = False
     
     _ai_cache["online"] = online
@@ -60,11 +63,19 @@ def get_user_location(request):
 # ===============================
 def get_cache_key(endpoint, payload):
     """Location + category + user_input ভিত্তিক cache key (100m precision)"""
-    lat = round(payload.get('latitude', 0), 3)  # 0.001° ≈ 111m
-    lng = round(payload.get('longitude', 0), 3)
-    category = payload.get('category', '')
-    user_input = payload.get('user_input', '')[:50]  # first 50 chars
-    
+    try:
+        lat_val = float(payload.get('latitude') or 0)
+    except (ValueError, TypeError):
+        lat_val = 0.0
+    try:
+        lng_val = float(payload.get('longitude') or 0)
+    except (ValueError, TypeError):
+        lng_val = 0.0
+    lat = round(lat_val, 3)
+    lng = round(lng_val, 3)
+    category = (payload.get('category') or '').strip()
+    user_input = (payload.get('user_input') or '')[:50]
+
     key_str = f"{endpoint}:{category}:{user_input}:{lat}:{lng}"
     return f"ai:{hashlib.md5(key_str.encode()).hexdigest()}"
 
@@ -83,21 +94,33 @@ def call_ai_api(endpoint, payload, token, timeout=100):  # default timeout 100 �
     try:
         headers = {}
         if token:
-            headers["Authorization"] = f"Bearer {token}"
-        url = f"{BASE_AI_URL}{endpoint}"
+            try:
+                token_value = getattr(token, 'key', None) or str(token)
+            except Exception:
+                token_value = str(token)
+            if token_value:
+                headers["Authorization"] = f"Bearer {token_value}"
+
+        url = f"{BASE_AI_URL.rstrip('/')}{endpoint if endpoint.startswith('/') else '/' + endpoint}"
         r = requests.post(url, json=payload, headers=headers, timeout=timeout)
-        data = r.json()
-        
+        try:
+            data = r.json() if r.content else {}
+        except Exception as e:
+            logger.error("AI response not JSON: %s", e)
+            data = {"raw_text": r.text}
+         
         # Success হলে 10 মিনিট cache
-        if r.status_code == 200 and data:
+        if 200 <= r.status_code < 300 and data:
             cache.set(cache_key, data, timeout=600)  # 10 min
-        
+         
         return data, r.status_code
     except requests.Timeout:
         return {"error": "AI server timeout"}, 504
     except requests.ConnectionError:
+        logger.warning("AI connection error")
         return {"error": "AI server offline"}, 503
     except Exception as e:
+        logger.exception("call_ai_api error")
         return {"error": str(e)}, 500
 
 CATEGORY_KEY_MAP = {
