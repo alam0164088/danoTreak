@@ -52,3 +52,6 @@ urllib3==2.5.0
 websockets==11.0.3
 whitenoise==6.10.0
 zope.interface==8.1.1
+
+pytest
+pytest-django

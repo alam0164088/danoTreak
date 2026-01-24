@@ -24,7 +24,7 @@ def haversine_distance(lat1, lon1, lat2, lon2):
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
     return R * c * 1000
 
-BASE_AI_URL = "http://10.10.7.82:8005"
+BASE_AI_URL = "http://3.19.225.124:8005/docs"
 
 _ai_cache = {"online": None, "checked_at": 0}
 
