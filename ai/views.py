@@ -91,6 +91,9 @@ def call_ai_api(endpoint, payload, token, timeout=100):
         url = f"{BASE_AI_URL.rstrip('/')}/{endpoint.lstrip('/')}"
         logger.info("AI CALL -> URL: %s, payload: %s", url, payload)
         r = requests.post(url, json=payload, headers=headers, timeout=timeout)
+        # extra debug for deployment issues
+        logger.debug("AI response status=%s headers=%s", r.status_code, dict(r.headers))
+        logger.debug("AI response text (first1k)=%s", (r.text or "")[:1000])
         try:
             data = r.json() if r.content else {}
         except Exception as e:
@@ -761,4 +764,4 @@ class NearbyCampaignVendorsAPI(APIView):
         })
 
 
-        # 
+        #
