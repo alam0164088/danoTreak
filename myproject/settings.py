@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 from datetime import timedelta
 import environ
+from dotenv import load_dotenv
 
 # ===================== BASE DIR & ENV SETUP =====================
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -13,6 +14,18 @@ env = environ.Env(
 
 # .env ফাইল রিড করা
 environ.Env.read_env(os.path.join(BASE_DIR, '.env'))
+
+# load .env (add this near top, before reading ALLOWED_HOSTS or DEBUG)
+load_dotenv()
+
+# Prepare ALLOWED_HOSTS from .env (fallback to localhost)
+_env_allowed = os.getenv("ALLOWED_HOSTS", "127.0.0.1,localhost").split(",")
+ALLOWED_HOSTS = [h.strip() for h in _env_allowed if h.strip()]
+
+# If DEBUG true, allow 0.0.0.0 for local daphne binds
+DEBUG = os.getenv("DEBUG", "False").lower() in ("1", "true", "yes")
+if DEBUG and "0.0.0.0" not in ALLOWED_HOSTS:
+    ALLOWED_HOSTS.append("0.0.0.0")
 
 # ===================== CORE SETTINGS =====================
 SECRET_KEY = env("SECRET_KEY")
@@ -173,4 +186,4 @@ USE_I18N = True
 USE_TZ = True
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-# 
+#

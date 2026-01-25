@@ -130,7 +130,8 @@ class AIThrottle(UserRateThrottle):
 class CategoryNearbyAI(APIView):
     permission_classes = [IsUser]
     throttle_classes = [AIThrottle]
-    ALLOWED_CATEGORIES = ["place", "restaurant", "beverage", "lodging", "activities"]
+    # ✅ "itinerary" এখানে যোগ করা হয়েছে
+    ALLOWED_CATEGORIES = ["place", "restaurant", "beverage", "lodging", "activities", "itinerary"]
 
     def post(self, request):
         user_lat, user_lng = get_user_location(request)
@@ -138,15 +139,54 @@ class CategoryNearbyAI(APIView):
             return Response({"success": False, "message": "লোকেশন পাওয়া যায়নি। প্রোফাইল আপডেট করুন।"}, status=400)
 
         category = request.data.get("category", "").lower().strip()
+        user_input = request.data.get("user_input", "") # Itinerary এর জন্য ইউজার ইনপুট (যেমন: দিন সংখ্যা)
+
         if category not in self.ALLOWED_CATEGORIES:
             return Response({
                 "success": False,
                 "message": f"Allowed categories: {', '.join(self.ALLOWED_CATEGORIES)}"
             }, status=400)
 
+        # ============================================================
+        # 🔥 SPECIAL HANDLING FOR ITINERARY (DIRECT AI RESPONSE)
+        # ============================================================
+        if category == "itinerary":
+            if not is_ai_online():
+                return Response({"success": False, "message": "AI সার্ভার অফলাইন আছে, পরে চেষ্টা করুন।"}, status=503)
+            
+            # Payload for Itinerary
+            payload = {
+                "category": category,
+                "latitude": user_lat,
+                "longitude": user_lng,
+                "user_input": user_input  # "3 days plan" বা এই ধরণের ইনপুট
+            }
+
+            # AI Call (endpoint আপনার AI সার্ভারের কনফিগারেশন অনুযায়ী হবে, এখানে ডিফল্ট রাখা হলো)
+            # যদি Itinerary এর জন্য আলাদা endpoint থাকে (যেমন /plan_trip), তবে "/get_location" চেঞ্জ করবেন।
+            data, code = call_ai_api("/get_location", payload, request.auth, timeout=120)
+
+            if code == 200:
+                # ✅ ডিরেক্ট রেসপন্স (কোনো ফরম্যাটিং ছাড়া)
+                return Response({
+                    "success": True,
+                    "category": category,
+                    "itinerary_data": data  # পুরো JSON এখানে চলে যাবে
+                }, status=200)
+            else:
+                return Response({
+                    "success": False, 
+                    "message": "AI Itinerary জেনারেট করতে ব্যর্থ হয়েছে।",
+                    "error_details": data
+                }, status=code)
+
+        # ============================================================
+        # ⬇️ EXISTING LOGIC FOR OTHER VENDORS (Restaurant, Place, etc.)
+        # ============================================================
+        
         vendors_list = []
 
-        # ✅ DB vendors (always fresh)
+        # ✅ DB vendors
         db_vendors = Vendor.objects.filter(
             is_profile_complete=True,
             latitude__isnull=False,
@@ -175,13 +215,13 @@ class CategoryNearbyAI(APIView):
                     "source": "db"
                 })
 
-        # ✅ AI vendors (cached 10 min)
+        # ✅ AI vendors
         ai_info = {"status": "skipped"}
 
         if is_ai_online():
             try:
-                payload = {"category": category, "latitude": user_lat, "longitude": user_lng}
-                data, code = call_ai_api("/get_location", payload, request.auth, timeout=100)  # timeout 100 করা হলো
+                payload = {"category": category, "latitude": user_lat, "longitude": user_lng, "user_input": user_input}
+                data, code = call_ai_api("/get_location", payload, request.auth, timeout=100)
                 
                 if code == 200 and data and isinstance(data, dict):
                     ai_items = data.get(CATEGORY_KEY_MAP.get(category, category), [])
@@ -216,7 +256,7 @@ class CategoryNearbyAI(APIView):
         else:
             ai_info = {"status": "offline"}
 
-        # ✅ Sort: DB first, then AI by distance
+        # ✅ Sort
         vendors_list.sort(key=lambda x: (0 if x.get("source") == "db" else 1, x.get("distance_meters", 1e9)))
 
         return Response({
@@ -346,27 +386,87 @@ class ChatActivitiesAPI(APIView):
         data, code = call_ai_api("/chat/activities", final_payload, token)
         return Response(data, status=code)
 
-
 class ChatItineraryAPI(APIView):
     permission_classes = [IsUser]
     throttle_classes = [AIThrottle]
 
     def post(self, request):
-        token = request.auth
+        # resolve token (request.auth, Authorization header, or access_token in body)
+        token = getattr(request, "auth", None)
+        if not token:
+            auth_hdr = request.headers.get("Authorization") or request.data.get("access_token")
+            if auth_hdr:
+                v = auth_hdr.strip()
+                token = v.split(" ", 1)[1].strip() if v.lower().startswith("bearer ") else v
+
+        # resolve coordinates: user profile first, then request body
         user_lat, user_lng = get_user_location(request)
-        if not user_lat or not user_lng:
-            return Response({"success": False, "message": "location could not be found. Please update your profile."}, status=400)
+        if user_lat is None or user_lng is None:
+            try:
+                body_lat = request.data.get("latitude")
+                body_lng = request.data.get("longitude")
+                if body_lat is not None and body_lng is not None:
+                    user_lat, user_lng = float(body_lat), float(body_lng)
+            except Exception:
+                user_lat, user_lng = None, None
 
-        message = request.data.get("message")
-        preferences = request.data.get("preferences", {})
+        if user_lat is None or user_lng is None:
+            return Response({"success": False, "message": "Location could not be found. Provide latitude & longitude or update profile."}, status=400)
 
+        message = (request.data.get("message") or "").strip()
+        preferences = request.data.get("preferences", {}) or {}
         if not message:
-            return Response({"success": False, "message": "message required"}, status=400)
+            return Response({"success": False, "message": "Message is required"}, status=400)
 
-        final_payload = {"user_input": message, "latitude": user_lat, "longitude": user_lng, "preferences": preferences}
-        data, code = call_ai_api("/chat/itinerary", final_payload, token)
-        return Response(data, status=code)
+        # strong instruction to return ONLY structured JSON
+        DEFAULT_ITINERARY_INSTRUCTION = (
+            "Return ONLY valid JSON with top-level keys: 'destination','trip_overview','daily_itinerary',"
+            "'additional_recommendations','packing_suggestions','best_photo_spots'. Do NOT ask follow-up questions."
+        )
+        prompt = f"{message}\n\n{DEFAULT_ITINERARY_INSTRUCTION}"
 
+        final_payload = {
+            "user_input": prompt,
+            "latitude": user_lat,
+            "longitude": user_lng,
+            "preferences": preferences
+        }
+
+        ai_data, code = call_ai_api("/chat/itinerary", final_payload, token, timeout=120)
+
+        # normalize AI response: accept dict result or parse raw_text
+        import json
+        if isinstance(ai_data, dict):
+            if {"destination", "trip_overview", "daily_itinerary"}.intersection(set(ai_data.keys())):
+                destination_info = ai_data.get("destination", {})
+                city_name = destination_info.get("city", "Destination")
+                trip_days = ai_data.get("trip_overview", {}).get("duration_days", "N/A")
+                daily_itinerary = ai_data.get("daily_itinerary", [])
+                formatted_response = {
+                    "status": "success",
+                    "category": "itinerary",
+                    "reply": f"Here's your personalized {trip_days}-day itinerary for {city_name}!",
+                    "count": len(daily_itinerary),
+                    "items": daily_itinerary,
+                    "data": ai_data
+                }
+                return Response(formatted_response, status=200)
+            # try parse raw text field
+            raw = ai_data.get("raw_text") or ai_data.get("raw") or ai_data.get("text")
+            if isinstance(raw, str):
+                try:
+                    parsed = json.loads(raw)
+                    return Response(parsed, status=200)
+                except Exception:
+                    return Response({"success": False, "message": "AI returned non-JSON itinerary", "raw": raw}, status=502)
+        elif isinstance(ai_data, str):
+            try:
+                parsed = json.loads(ai_data)
+                return Response(parsed, status=200)
+            except Exception:
+                return Response({"success": False, "message": "AI returned non-JSON text", "raw": ai_data}, status=502)
+
+        return Response({"success": False, "message": "Invalid AI response", "raw": ai_data}, status=502)
 
 class GetLocationAPI(APIView):
     permission_classes = [IsUser]
