@@ -759,3 +759,6 @@ class NearbyCampaignVendorsAPI(APIView):
             "total_vendors": len(vendor_list),
             "vendors": vendor_list
         })
+
+
+        # 
