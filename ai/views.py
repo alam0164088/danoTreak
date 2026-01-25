@@ -436,22 +436,42 @@ class ChatItineraryAPI(APIView):
 
         # normalize AI response: accept dict result or parse raw_text
         import json
+        def extract_structured(d):
+            """Return dict with keys destination, trip_overview, daily_itinerary if present in d or nested 'data'"""
+            if not isinstance(d, dict):
+                return None
+            # direct
+            if {"destination", "trip_overview", "daily_itinerary"}.issubset(set(d.keys())):
+                return d
+            # nested under 'data'
+            inner = d.get("data") if isinstance(d.get("data"), dict) else None
+            if inner and {"destination", "trip_overview", "daily_itinerary"}.issubset(set(inner.keys())):
+                return inner
+            # if items + data pattern (items is day list, data has meta)
+            if isinstance(d.get("items"), list) and inner:
+                merged = dict(inner)
+                merged["daily_itinerary"] = d.get("items")
+                return merged
+            return None
+
+        # handle dict response
         if isinstance(ai_data, dict):
-            if {"destination", "trip_overview", "daily_itinerary"}.intersection(set(ai_data.keys())):
-                destination_info = ai_data.get("destination", {})
+            structured = extract_structured(ai_data)
+            if structured:
+                destination_info = structured.get("destination", {})
                 city_name = destination_info.get("city", "Destination")
-                trip_days = ai_data.get("trip_overview", {}).get("duration_days", "N/A")
-                daily_itinerary = ai_data.get("daily_itinerary", [])
+                trip_days = structured.get("trip_overview", {}).get("duration_days", "N/A")
+                daily_itinerary = structured.get("daily_itinerary", [])
                 formatted_response = {
                     "status": "success",
                     "category": "itinerary",
                     "reply": f"Here's your personalized {trip_days}-day itinerary for {city_name}!",
                     "count": len(daily_itinerary),
                     "items": daily_itinerary,
-                    "data": ai_data
+                    "data": ai_data.get("data") or structured or ai_data
                 }
                 return Response(formatted_response, status=200)
-            # try parse raw text field
+            # try parsing raw text fields
             raw = ai_data.get("raw_text") or ai_data.get("raw") or ai_data.get("text")
             if isinstance(raw, str):
                 try:
@@ -459,9 +479,24 @@ class ChatItineraryAPI(APIView):
                     return Response(parsed, status=200)
                 except Exception:
                     return Response({"success": False, "message": "AI returned non-JSON itinerary", "raw": raw}, status=502)
-        elif isinstance(ai_data, str):
+        # handle string response
+        if isinstance(ai_data, str):
             try:
                 parsed = json.loads(ai_data)
+                structured = extract_structured(parsed)
+                if structured:
+                    destination_info = structured.get("destination", {})
+                    city_name = destination_info.get("city", "Destination")
+                    trip_days = structured.get("trip_overview", {}).get("duration_days", "N/A")
+                    daily_itinerary = structured.get("daily_itinerary", [])
+                    return Response({
+                        "status": "success",
+                        "category": "itinerary",
+                        "reply": f"Here's your personalized {trip_days}-day itinerary for {city_name}!",
+                        "count": len(daily_itinerary),
+                        "items": daily_itinerary,
+                        "data": parsed
+                    }, status=200)
                 return Response(parsed, status=200)
             except Exception:
                 return Response({"success": False, "message": "AI returned non-JSON text", "raw": ai_data}, status=502)
@@ -603,6 +638,8 @@ class ToggleFavoriteVendor(APIView):
             favorite = FavoriteVendor.objects.create(user=user, vendor=vendor)
             vendor_data = get_vendor_info(favorite)  # fresh instance
             return Response({"success": True, "message": "Added to favorites", "is_favorite": True, "vendor": vendor_data})
+        
+        
 # My Favorite Vendors
 class MyFavoriteVendorsAPI(APIView):
     permission_classes = [IsAuthenticated]
