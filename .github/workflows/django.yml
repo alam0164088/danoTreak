@@ -65,3 +65,5 @@ jobs:
             python manage.py collectstatic --noinput
             sudo systemctl restart gunicorn
           EOF
+
+# fdfd
