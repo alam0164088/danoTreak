@@ -13,7 +13,8 @@ class RegisterSerializer(serializers.ModelSerializer):
     password_confirm = serializers.CharField(write_only=True, min_length=8)
     send_verification_otp = serializers.BooleanField(default=True, write_only=True)
     role = serializers.ChoiceField(choices=User.ROLE_CHOICES, default='user', required=False)
-    phone = serializers.CharField(required=False, allow_blank=True)  # নতুন ফিল্ড
+    # Allow any phone value and make it optional
+    phone = serializers.CharField(required=False, allow_blank=True, allow_null=True)
 
     class Meta:
         model = User
@@ -309,7 +310,7 @@ class ReferralCodeSerializer(serializers.ModelSerializer):
     def get_referral_link(self, obj):
         base_url = getattr(settings, 'FRONTEND_URL', 'https://danotreak.com')
         return f"{base_url}/register?ref={obj.referral_code}"
-    
+
 
 
 
