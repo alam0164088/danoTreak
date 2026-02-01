@@ -49,18 +49,20 @@ jobs:
           SSH_HOST: ${{ secrets.AWS_HOST }}
           SSH_USER: ubuntu
         run: |
+          set -e
           mkdir -p ~/.ssh
-          # SSH প্রাইভেট কী ফাইল তৈরি
-          echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
+
+          # 🔑 SSH private key (CRLF safe)
+          echo "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
-          
-          # সার্ভারকে চেনার জন্য known_hosts এ যোগ করা
+
+          # 🔐 Add server to known_hosts
           ssh-keyscan -H $SSH_HOST >> ~/.ssh/known_hosts
-          
-          # টার্গেট সার্ভারে ডেপ্লয়মেন্ট কমান্ডগুলো রান করা
+
+          # 🚀 Deploy on server
           ssh -i ~/.ssh/id_rsa $SSH_USER@$SSH_HOST "
+            set -xe
             cd /home/ubuntu/danoTreak &&
-            git config pull.rebase false &&
             git fetch --all &&
             git reset --hard origin/main &&
             git pull origin main &&
@@ -70,3 +72,5 @@ jobs:
             python manage.py collectstatic --noinput &&
             sudo systemctl restart gunicorn
           "
+
+      
