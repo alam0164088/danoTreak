@@ -81,6 +81,19 @@ class LoginSerializer(serializers.Serializer):
     email = serializers.EmailField()
     password = serializers.CharField(write_only=True)
     remember_me = serializers.BooleanField(default=False)
+    # role বাধ্যতামূলক: user/admin/vendor যে রোল দিয়ে লগইন করবে, শুধু সেই রোলই অনুমোদিত
+    role = serializers.ChoiceField(choices=User.ROLE_CHOICES, required=True)
+
+    def validate(self, data):
+        email = data.get("email")
+        role = data.get("role")
+        try:
+            user = User.objects.get(email=email)
+            if user.role != role:
+                raise serializers.ValidationError({"email": f"Only {role} accounts can log in."})
+        except User.DoesNotExist:
+            pass
+        return data
 
 class RefreshTokenSerializer(serializers.Serializer):
     refresh_token = serializers.CharField()
@@ -246,7 +259,7 @@ class VendorSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'user', 'created_at', 'updated_at']
 
 # class LoyaltyProgramSerializer(serializers.ModelSerializer):
-#     vendor = serializers.PrimaryKeyRelatedField(read_only=True)
+#     vendor = serializers.PrimaryKeyRelatedField(readOnly=True)
 
 #     class Meta:
 #         model = LoyaltyProgram
