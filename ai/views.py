@@ -26,7 +26,7 @@ def haversine_distance(lat1, lon1, lat2, lon2):
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
     return R * c * 1000
 
-BASE_AI_URL = "http://3.19.225.124:8005"  # use API base, not /docs
+BASE_AI_URL = "http://3.18.41.244:8005"  # http://3.18.41.244:8005/
 
 _ai_cache = {"online": None, "checked_at": 0}
 
@@ -139,7 +139,7 @@ class CategoryNearbyAI(APIView):
     def post(self, request):
         user_lat, user_lng = get_user_location(request)
         if not user_lat or not user_lng:
-            return Response({"success": False, "message": "লোকেশন পাওয়া যায়নি। প্রোফাইল আপডেট করুন।"}, status=400)
+            return Response({"success": False, "message": "Location not found. Please update your profile."}, status=400)
 
         category = request.data.get("category", "").lower().strip()
         user_input = request.data.get("user_input", "") # Itinerary এর জন্য ইউজার ইনপুট (যেমন: দিন সংখ্যা)
@@ -155,7 +155,7 @@ class CategoryNearbyAI(APIView):
         # ============================================================
         if category == "itinerary":
             if not is_ai_online():
-                return Response({"success": False, "message": "AI সার্ভার অফলাইন আছে, পরে চেষ্টা করুন।"}, status=503)
+                return Response({"success": False, "message": "AI server is offline, please try again later."}, status=503)
             
             # Payload for Itinerary
             payload = {
@@ -288,7 +288,7 @@ class ChatNormalAPI(APIView):
 
         message = request.data.get("message")
         if not message:
-            return Response({"success": False, "message": "message প্রয়োজন"}, status=400)
+            return Response({"success": False, "message": "message required"}, status=400)
 
         final_payload = {"user_input": message, "latitude": user_lat, "longitude": user_lng}
         data, code = call_ai_api("/chat/normal", final_payload, token)
@@ -307,7 +307,7 @@ class ChatPlacesAPI(APIView):
 
         message = request.data.get("message")
         if not message:
-            return Response({"success": False, "message": "message প্রয়োজন"}, status=400)
+            return Response({"success": False, "message": "message required"}, status=400)
 
         final_payload = {"user_input": message, "latitude": user_lat, "longitude": user_lng}
         data, code = call_ai_api("/chat/places", final_payload, token)
