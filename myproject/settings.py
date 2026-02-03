@@ -133,21 +133,23 @@ MEDIA_ROOT = BASE_DIR / "media"
 CORS_ALLOW_CREDENTIALS = True
 
 
-# এখানে সরাসরি আপনার আইপি এবং লোকালহোস্ট দেওয়া হলো (নিরাপদ উপায়)
+# এখানে সরাসরি আপনার আইপি এবং লোকালহোস্ট দেওয়া হলো (নিরাপদ উপায়)
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
-    "http://3.144.126.69",      # আপনার AWS IP
+    "http://3.144.126.69",       # আপনার পুরনো AWS IP
     "https://3.144.126.69", 
-    "http://api.trekbot.ai",    # <--- নতুন যোগ করা হয়েছে
-    "https://api.trekbot.ai",    # যদি SSL ব্যবহার করেন
+    "http://3.18.41.244:3000",   # <--- নতুন যোগ করা হয়েছে
+    "http://api.trekbot.ai",    
+    "https://api.trekbot.ai",    
 ]
 
 CSRF_TRUSTED_ORIGINS = [
     "http://3.144.126.69",
     "https://3.144.126.69",
     "http://127.0.0.1",
-    "https://api.trekbot.ai",   # <--- নতুন
+    "http://3.18.41.244",        # CSRF এর জন্য সাধারণত পোর্ট ছাড়া প্রোটোকলসহ আইপি দিতে হয়
+    "https://api.trekbot.ai",   
     "http://api.trekbot.ai",
 ]
 
