@@ -141,7 +141,9 @@ CORS_ALLOWED_ORIGINS = [
     "https://3.144.126.69", 
     "http://3.18.41.244:3000",   # <--- নতুন যোগ করা হয়েছে
     "http://api.trekbot.ai",    
-    "https://api.trekbot.ai",    
+    "https://api.trekbot.ai",  
+    "http://trekbotai.com",
+    "https://trekbotai.com",  
 ]
 
 CSRF_TRUSTED_ORIGINS = [
@@ -151,7 +153,12 @@ CSRF_TRUSTED_ORIGINS = [
     "http://3.18.41.244",        # CSRF এর জন্য সাধারণত পোর্ট ছাড়া প্রোটোকলসহ আইপি দিতে হয়
     "https://api.trekbot.ai",   
     "http://api.trekbot.ai",
+    "http://trekbotai.com",
+    "https://trekbotai.com",
 ]
+
+    
+
 
 # ===================== GOOGLE AUTH =====================
 SOCIALACCOUNT_LOGIN_ON_GET = True
