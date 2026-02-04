@@ -7,7 +7,7 @@ TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZX
 
 
 # =================== WebSocket URL ===================
-WS_URL = f"ws://127.0.0.1:8002/ws/location/?token={TOKEN}"
+WS_URL = f"ws://127.0.0.1:8001/ws/location/?token={TOKEN}"
 
 # =================== লোকেশন ===================
 LATITUDE = 23.810331
