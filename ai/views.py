@@ -26,7 +26,7 @@ def haversine_distance(lat1, lon1, lat2, lon2):
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
     return R * c * 1000
 
-BASE_AI_URL = "http://ai.trekbotai.com/docs"  # http://3.18.41.244:8005/
+BASE_AI_URL = "http://ai.trekbotai.com"  # http://3.18.41.244:8005/
 
 _ai_cache = {"online": None, "checked_at": 0}
 
