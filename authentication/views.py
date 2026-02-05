@@ -1039,6 +1039,7 @@ class CompleteVendorProfileView(APIView):
                 "thumbnail_image": thumbnail_url,
                 "shop_images": shop_images_full,
                 "description": vendor.description or "",
+                "website": vendor.website or "",
                 "activities": vendor.activities or [],
                 "rating": float(vendor.rating) if vendor.rating else 0.0,
                 "review_count": vendor.review_count or 0,
