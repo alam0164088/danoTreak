@@ -13,6 +13,7 @@ class Campaign(models.Model):
     reward_name = models.CharField(max_length=200)
     reward_description = models.TextField(blank=True, null=True)
     is_active = models.BooleanField(default=True)
+    image = models.ImageField(upload_to='campaigns/%Y/%m/%d/', null=True, blank=True)  # new
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):

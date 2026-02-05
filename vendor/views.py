@@ -1,4 +1,5 @@
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import api_view, permission_classes, parser_classes
+from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
@@ -8,6 +9,10 @@ from datetime import timedelta
 from math import radians, sin, cos, sqrt, atan2
 from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404
+from django.core.files.base import ContentFile
+from django.core.files.storage import default_storage
+import os
+import uuid
 
 from authentication.models import Vendor
 from .models import Campaign, Visitor, Visit, Redemption
@@ -142,7 +147,7 @@ def campaign_list(request):
     if not vendor:
         return Response({"error": "Vendor profile not found"}, status=403)
 
-    campaigns = Campaign.objects.filter(vendor=vendor).annotate(
+    qs = Campaign.objects.filter(vendor=vendor).annotate(
         redemption_number=Count(
             'redemptions',
             filter=Q(redemptions__status='redeemed')
@@ -152,13 +157,25 @@ def campaign_list(request):
             filter=Q(redemptions__status='pending')
         ),
         total_redemptions=Count('redemptions')
-    ).values(
-        'id', 'name', 'reward_name', 'required_visits',
-        'reward_description', 'is_active',
-        'created_at', 'redemption_number', 'pending_number', 'total_redemptions'
     )
 
-    return Response({"campaigns": list(campaigns)})
+    campaigns = []
+    for c in qs:
+        campaigns.append({
+            'id': c.id,
+            'name': c.name,
+            'reward_name': c.reward_name,
+            'required_visits': c.required_visits,
+            'reward_description': c.reward_description,
+            'is_active': c.is_active,
+            'created_at': c.created_at,
+            'redemption_number': getattr(c, 'redemption_number', 0),
+            'pending_number': getattr(c, 'pending_number', 0),
+            'total_redemptions': getattr(c, 'total_redemptions', 0),
+            'image_url': request.build_absolute_uri(c.image.url) if getattr(c, 'image', None) else None
+        })
+
+    return Response({"campaigns": campaigns})
 
 
 @api_view(['GET'])
@@ -222,6 +239,7 @@ def redeem_once(request, redemption_id):
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
+@parser_classes([MultiPartParser, FormParser])
 def create_campaign(request):
     vendor = getattr(request.user, "vendor_profile", None)
     if not vendor:
@@ -236,10 +254,16 @@ def create_campaign(request):
         is_active=request.data.get('is_active', True)
     )
 
-    return Response(
-        {"message": "Campaign created", "id": campaign.id},
-        status=status.HTTP_201_CREATED
-    )
+    # save uploaded image to Campaign.image if provided (key: 'image')
+    if 'image' in request.FILES and request.FILES['image']:
+        f = request.FILES['image']
+        campaign.image.save(f"{uuid4().hex}{os.path.splitext(f.name)[1]}", ContentFile(f.read()), save=True)
+
+    resp = {"message": "Campaign created", "id": campaign.id}
+    if campaign.image:
+        resp['image_url'] = request.build_absolute_uri(campaign.image.url)
+
+    return Response(resp, status=status.HTTP_201_CREATED)
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
@@ -430,7 +454,7 @@ class UserAndVendorListView(APIView):
                 aliffited_map[uid].append(r.aliffited_id)
 
         # =========================
-        # VISITS MAPPING (already computed above)
+        # VISITS MAPPING (already computed উপরে)
         # =========================
         # visited_vendors_map built earlier: user_id -> set(vendor_id)
 
@@ -551,7 +575,8 @@ class CampaignRedemptionReportView(APIView):
                 "required_visits": campaign.required_visits,
                 "total_redemptions": redemptions.count(),
                 "redeemed_ids": redeemed_ids,
-                "pending_ids": pending_ids
+                "pending_ids": pending_ids,
+                "image_url": request.build_absolute_uri(campaign.image.url) if getattr(campaign, 'image', None) else None
             })
 
         return Response({"campaign_report": report}, status=200)

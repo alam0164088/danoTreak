@@ -1334,7 +1334,7 @@ class VendorProfileUpdateRequestView(APIView):
         if request.user.role != 'vendor':
             return Response({
                 "success": False,
-                "message": "শুধুমাত্র ভেন্ডর এই কাজ করতে পারবে"
+                "message": "Only vendors are allowed to perform this action."
             }, status=403)
 
         try:
@@ -1342,7 +1342,7 @@ class VendorProfileUpdateRequestView(APIView):
         except AttributeError:
             return Response({
                 "success": False,
-                "message": "ভেন্ডর প্রোফাইল পাওয়া যায়নি। প্রথমে প্রোফাইল কমপ্লিট করুন।"
+                "message": "Vendor profile not found. Please complete your profile first."
             }, status=404)
 
         data = request.data
@@ -1472,7 +1472,7 @@ class VendorProfileUpdateRequestView(APIView):
 
         return Response({
             "success": True,
-            "message": "প্রোফাইল আপডেট রিকোয়েস্ট সফলভাবে পাঠানো হয়েছে। এডমিন শীঘ্রই রিভিউ করবে।",
+            "message": "Profile update request has been successfully submitted. Admin will review it soon.",
             "request_id": update_request.id,
             "status": update_request.status,
             "requested_changes": new_data,
@@ -1482,7 +1482,7 @@ class VendorProfileUpdateRequestView(APIView):
 
     def get(self, request):
         if request.user.role != 'vendor':
-            return Response({"success": False, "message": "অ্যাক্সেস নিষেধ"}, status=403)
+            return Response({"success": False, "message": "Access denied"}, status=403)
 
         try:
             vendor = request.user.vendor_profile
@@ -1495,7 +1495,7 @@ class VendorProfileUpdateRequestView(APIView):
                     "status_bangla": dict(VendorProfileUpdateRequest.STATUS_CHOICES).get(r.status, r.status),
                     "requested_at": r.created_at.strftime("%d %b %Y, %I:%M %p"),
                     "reviewed_at": r.reviewed_at.strftime("%d %b %Y, %I:%M %p") if r.reviewed_at else None,
-                    "reason": r.reason or "কোনো কারণ দেওয়া হয়নি",
+                    "reason": r.reason or "no reason provided",
                     "new_data": r.new_data,
                     "documents": {
                         "nid_front": request.build_absolute_uri(r.nid_front.url) if r.nid_front else None,
