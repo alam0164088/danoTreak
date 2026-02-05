@@ -1435,15 +1435,40 @@ class VendorProfileUpdateRequestView(APIView):
                 new_data['thumbnail_image'] = request.build_absolute_uri(settings.MEDIA_URL + tpath)
 
         # === রিকোয়েস্ট সেভ করা ===
+        # Create update_request WITHOUT passing UploadedFile objects directly
         update_request = VendorProfileUpdateRequest.objects.create(
             vendor=vendor,
             requested_by=request.user,
             new_data=new_data,
-            nid_front=files.get('nid_front'),
-            nid_back=files.get('nid_back'),
-            trade_license=files.get('trade_license'),
             shop_images=uploaded_shop_images
         )
+
+        # Save file fields safely (read into ContentFile then save), then close uploaded files
+        if files.get('nid_front'):
+            f = files.get('nid_front')
+            ext = os.path.splitext(f.name)[1].lower()
+            fname = f"nid_front_{uuid.uuid4().hex}{ext}"
+            update_request.nid_front.save(fname, ContentFile(f.read()), save=False)
+            try: f.close()
+            except: pass
+
+        if files.get('nid_back'):
+            f = files.get('nid_back')
+            ext = os.path.splitext(f.name)[1].lower()
+            fname = f"nid_back_{uuid.uuid4().hex}{ext}"
+            update_request.nid_back.save(fname, ContentFile(f.read()), save=False)
+            try: f.close()
+            except: pass
+
+        if files.get('trade_license'):
+            f = files.get('trade_license')
+            ext = os.path.splitext(f.name)[1].lower()
+            fname = f"trade_license_{uuid.uuid4().hex}{ext}"
+            update_request.trade_license.save(fname, ContentFile(f.read()), save=False)
+            try: f.close()
+            except: pass
+
+        update_request.save()
 
         return Response({
             "success": True,
@@ -2156,8 +2181,8 @@ def reject_vendor_update_request(request, request_id):
     try:
         Notification.objects.create(
             user=update_request.vendor.user,
-            title="প্রোফাইল আপডেট প্রত্যাখ্যাত",
-            message=f"আপনার প্রোফাইল আপডেট রিকোয়েস্ট প্রত্যাখ্যান করা হয়েছে। কারণ: {reason}"
+            title="profile Update Rejected",
+            message=f"Your profile update request has been rejected. Reason: {reason}"
         )
     except:
         pass
