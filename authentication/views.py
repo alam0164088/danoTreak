@@ -2014,9 +2014,45 @@ def approve_vendor_update_request(request, request_id):
 
     # Add new shop images if any
     if update_request.shop_images:
-        existing_images = vendor.shop_images or []
-        existing_images.extend(update_request.shop_images)
-        vendor.shop_images = existing_images
+        # Replace existing images with the approved ones.
+        # Copy files from vendor_update_docs -> vendors/<vendor.id>/ to keep media organized.
+        new_images = []
+        for img_url in update_request.shop_images:
+            try:
+                parsed = urlparse(img_url)
+                media_path = parsed.path  # e.g. /media/vendor_update_docs/shop_images/xxx.png
+                # strip leading '/media/' if present
+                rel = media_path.lstrip('/')
+                if rel.startswith(settings.MEDIA_URL.lstrip('/')):
+                    rel = rel[len(settings.MEDIA_URL.lstrip('/')):].lstrip('/')
+                # open original file and save to vendors/<id>/
+                with default_storage.open(rel, 'rb') as f:
+                    content = f.read()
+                filename = os.path.basename(rel)
+                dest = f"vendors/{vendor.id}/{uuid.uuid4().hex}_{filename}"
+                saved = default_storage.save(dest, ContentFile(content))
+                new_images.append(f"/media/{saved}")
+            except Exception:
+                # fallback: keep original URL if copy fails
+                new_images.append(img_url)
+
+        # Optionally remove old shop image files (comment out if you want to keep them)
+        try:
+            old_images = vendor.shop_images or []
+            for old in old_images:
+                try:
+                    # old may be absolute URL or '/media/...' — normalize to storage path
+                    p = urlparse(old).path.lstrip('/')
+                    if p.startswith(settings.MEDIA_URL.lstrip('/')):
+                        p = p[len(settings.MEDIA_URL.lstrip('/')):].lstrip('/')
+                    if default_storage.exists(p):
+                        default_storage.delete(p)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        vendor.shop_images = new_images
 
     # Copy documents if provided
     if update_request.nid_front:
