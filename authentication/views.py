@@ -31,6 +31,7 @@ from rest_framework import status, serializers
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
+from django.conf import settings
 
 from rest_framework_simplejwt.tokens import RefreshToken
 
@@ -998,7 +999,7 @@ class CompleteVendorProfileView(APIView):
             return Response({"success": False, "message": "Vendor profile not found"}, status=404)
 
         # Shop images এ base URL যোগ করা
-        base_url = request.build_absolute_uri('/')[:-1]  # trailing slash বাদ
+        base_url = request.build_absolute_uri('/')[:-1]
         shop_images_full = []
         if vendor.shop_images:
             for img in vendor.shop_images:
@@ -1006,6 +1007,16 @@ class CompleteVendorProfileView(APIView):
                     shop_images_full.append(img)
                 else:
                     shop_images_full.append(f"{base_url}{img}")
+
+        # Thumbnail (prefer explicit field, else first shop image)
+        thumbnail_url = None
+        if hasattr(vendor, "thumbnail_image") and getattr(vendor, "thumbnail_image"):
+            try:
+                thumbnail_url = request.build_absolute_uri(vendor.thumbnail_image.url)
+            except Exception:
+                thumbnail_url = None
+        elif shop_images_full:
+            thumbnail_url = shop_images_full[0]
 
         return Response({
             "success": True,
@@ -1019,6 +1030,7 @@ class CompleteVendorProfileView(APIView):
                 "category": vendor.category or "",
                 "latitude": float(vendor.latitude) if vendor.latitude else None,
                 "longitude": float(vendor.longitude) if vendor.longitude else None,
+                "thumbnail_image": thumbnail_url,
                 "shop_images": shop_images_full,
                 "description": vendor.description or "",
                 "activities": vendor.activities or [],
@@ -1049,6 +1061,7 @@ class CompleteVendorProfileView(APIView):
         vendor.shop_address = data.get('shop_address', vendor.shop_address)
         vendor.category = data.get('category', vendor.category)
         vendor.description = data.get('description', vendor.description)
+        vendor.website = data.get('website', vendor.website)
 
         # Location
         if data.get('latitude'):
@@ -1062,8 +1075,8 @@ class CompleteVendorProfileView(APIView):
             if isinstance(activities, str):
                 try:
                     activities = json.loads(activities)
-                except:
-                    activities = [a.strip() for a in activities.split(',')]
+                except Exception:
+                    activities = [a.strip() for a in activities.split(',') if a.strip()]
             vendor.activities = activities
 
         # Rating & Review Count
@@ -1079,8 +1092,53 @@ class CompleteVendorProfileView(APIView):
             except (ValueError, TypeError):
                 pass
 
+        # Shop Images (start with existing images)
+        shop_images = vendor.shop_images or []
+
+        # Decide whether to replace existing images or append.
+        # If any uploaded file key mentions shop_image(s) we treat this request as replacing
+        # the vendor's existing shop_images with the newly uploaded ones.
+        try:
+            uploaded_keys = list(request.FILES.keys())
+        except Exception:
+            uploaded_keys = []
+
+        has_new_shop_images = any(
+            k.startswith('shop_image') or 'shop_images' in k
+            for k in uploaded_keys
+        )
+
+        if has_new_shop_images:
+            shop_images = []
+
         # Shop Images
         shop_images = vendor.shop_images or []
+        # Quick debug info about uploaded files
+        try:
+            uploaded_keys = list(request.FILES.keys())
+            # Count total files uploaded (supports repeated keys)
+            uploaded_count = sum(len(request.FILES.getlist(k)) if hasattr(request.FILES, 'getlist') else 1 for k in request.FILES.keys())
+        except Exception:
+            uploaded_keys = list(request.FILES.keys())
+            uploaded_count = len(uploaded_keys)
+
+        # 1) Accept multiple files under the single key 'shop_images' (common in Postman / JS clients)
+        for file in request.FILES.getlist('shop_images'):
+            ext = os.path.splitext(file.name)[1].lower()
+            filename = f"{uuid.uuid4().hex}{ext}"
+            path = f"vendors/{vendor.id}/{filename}"
+            saved_path = default_storage.save(path, file)
+            shop_images.append(f"/media/{saved_path}")
+
+        # 2) Also accept array-style key 'shop_images[]'
+        for file in request.FILES.getlist('shop_images[]'):
+            ext = os.path.splitext(file.name)[1].lower()
+            filename = f"{uuid.uuid4().hex}{ext}"
+            path = f"vendors/{vendor.id}/{filename}"
+            saved_path = default_storage.save(path, file)
+            shop_images.append(f"/media/{saved_path}")
+
+        # 3) Keep backward-compatible support for individual keys like shop_image1, shop_image2
         for key in request.FILES:
             if key.startswith('shop_image'):
                 file = request.FILES[key]
@@ -1089,9 +1147,24 @@ class CompleteVendorProfileView(APIView):
                 path = f"vendors/{vendor.id}/{filename}"
                 saved_path = default_storage.save(path, file)
                 shop_images.append(f"/media/{saved_path}")
+
         vendor.shop_images = shop_images
 
         # NID & Trade License
+        # Thumbnail image (optional): save separately and ensure it becomes the first image in shop_images
+        if request.FILES.get('thumbnail_image'):
+            file = request.FILES['thumbnail_image']
+            ext = os.path.splitext(file.name)[1].lower()
+            path = f"vendors/{vendor.id}/thumbnail{ext}"
+            # remove old thumbnail file if exists
+            if hasattr(vendor, 'thumbnail_image') and vendor.thumbnail_image and hasattr(vendor.thumbnail_image, 'path'):
+                try:
+                    if os.path.exists(vendor.thumbnail_image.path):
+                        os.remove(vendor.thumbnail_image.path)
+                except Exception:
+                    pass
+            # save thumbnail to the ImageField
+            vendor.thumbnail_image.save(os.path.basename(file.name), file, save=False)
         if request.FILES.get('nid_front'):
             file = request.FILES['nid_front']
             ext = os.path.splitext(file.name)[1].lower()
@@ -1119,10 +1192,32 @@ class CompleteVendorProfileView(APIView):
                     os.remove(vendor.trade_license.path)  # Remove old file
             vendor.trade_license.save(os.path.basename(file.name), file, save=True)
 
+        # Ensure thumbnail (if present) is reflected in shop_images as the first item
+        try:
+            if vendor.thumbnail_image and vendor.thumbnail_image.url:
+                thumb_path = f"/media/{vendor.thumbnail_image.name}" if not vendor.thumbnail_image.name.startswith('/media/') else vendor.thumbnail_image.name
+                # remove any existing occurrence of this path in shop_images
+                shop_images = [p for p in shop_images if p != thumb_path]
+                # put thumbnail at the start
+                shop_images.insert(0, thumb_path)
+        except Exception:
+            pass
+
+        vendor.shop_images = shop_images
         vendor.is_profile_complete = True
         vendor.save()
 
-        return Response({
+        # build full URLs for response
+        base_url = request.build_absolute_uri('/')[:-1]
+        shop_images_full = []
+        if vendor.shop_images:
+            for img in vendor.shop_images:
+                if img.startswith('http'):
+                    shop_images_full.append(img)
+                else:
+                    shop_images_full.append(f"{base_url}{img}")
+
+        response_payload = {
             "success": True,
             "message": "Profile completed successfully!",
             "vendor": {
@@ -1131,15 +1226,31 @@ class CompleteVendorProfileView(APIView):
                 "phone_number": vendor.phone_number,
                 "shop_address": vendor.shop_address,
                 "category": vendor.category,
-                "latitude": float(vendor.latitude),
-                "longitude": float(vendor.longitude),
-                "shop_images": vendor.shop_images,
+                "latitude": float(vendor.latitude) if vendor.latitude else None,
+                "longitude": float(vendor.longitude) if vendor.longitude else None,
+                "shop_images": shop_images_full,
+                "website": vendor.website,
                 "description": vendor.description,
                 "activities": vendor.activities,
                 "rating": float(vendor.rating),
                 "review_count": vendor.review_count,
             }
-        }, status=200)
+        }
+
+        # Add debug info when DEBUG is True so we can see what arrived vs what was saved
+        if getattr(settings, 'DEBUG', False):
+            try:
+                saved_count = len(vendor.shop_images) if vendor.shop_images else 0
+            except Exception:
+                saved_count = len(shop_images)
+
+            response_payload['debug'] = {
+                'uploaded_keys': uploaded_keys,
+                'uploaded_count': uploaded_count,
+                'saved_count': saved_count,
+            }
+
+        return Response(response_payload, status=200)
 
 
 
@@ -1381,7 +1492,7 @@ class AdminPendingVendorUpdateRequestsView(APIView):
                 'category': ('Category', vendor.category or "Not provided"),
                 'description': ('Description', vendor.description or "Not provided"),
                 'activities': ('Activities', ", ".join(vendor.activities) if vendor.activities else "Not provided"),
-                'rating': ('Rating', float(vendor.rating) if vendor.rating else 0.0),
+                'rating': ('Rating', float(vendor.rating) if v.vendor_rating else 0.0),
                 'review_count': ('Review Count', vendor.review_count if vendor.review_count else 0),
             }
 

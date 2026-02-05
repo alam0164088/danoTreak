@@ -62,23 +62,18 @@ def get_user_location(request):
 # ===============================
 def get_cache_key(endpoint, payload):
     """Location + category + user_input ভিত্তিক cache key (100m precision)"""
-    lat = round(payload.get('latitude', 0), 3)  # 0.001° ≈ 111m
-    lng = round(payload.get('longitude', 0), 3)
-    category = payload.get('category', '')
-    user_input = payload.get('user_input', '')[:50]  # first 50 chars
-    
-    key_str = f"{endpoint}:{category}:{user_input}:{lat}:{lng}"
-    return f"ai:{hashlib.md5(key_str.encode()).hexdigest()}"
+    # Cache disabled
+    return None
 
 # ===============================
-# ✅ AI API Call with Cache (10 min)
+# ✅ AI API Call (Cache DISABLED)
 # ===============================
 def call_ai_api(endpoint, payload, token, timeout=100):
-    """AI সার্ভারে POST request with 10 min cache"""
-    cache_key = get_cache_key(endpoint, payload)
-    cached = cache.get(cache_key)
-    if cached:
-        return cached, 200
+    """AI সার্ভারে POST request (cache disabled)"""
+    # cache_key = get_cache_key(endpoint, payload)
+    # cached = cache.get(cache_key)
+    # if cached:
+    #     return cached, 200
     try:
         headers = {}
         if token:
@@ -91,18 +86,15 @@ def call_ai_api(endpoint, payload, token, timeout=100):
         url = f"{BASE_AI_URL.rstrip('/')}/{endpoint.lstrip('/')}"
         logger.info("AI CALL -> URL: %s, payload: %s", url, payload)
         r = requests.post(url, json=payload, headers=headers, timeout=timeout)
-        # extra debug for deployment issues
-        logger.debug("AI response status=%s headers=%s", r.status_code, dict(r.headers))
-        logger.debug("AI response text (first1k)=%s", (r.text or "")[:1000])
         try:
             data = r.json() if r.content else {}
         except Exception as e:
             logger.error("AI response parse error: %s ; text: %s", e, r.text)
             data = {"raw_text": r.text}
-        
-        if 200 <= r.status_code < 300 and data:
-            cache.set(cache_key, data, timeout=600)
-        
+
+        # if 200 <= r.status_code < 300 and data:
+        #     cache.set(cache_key, data, timeout=600)
+
         return data, r.status_code
     except requests.Timeout:
         return {"error": "AI server timeout"}, 504

@@ -169,22 +169,29 @@ GOOGLE_CLIENT_SECRET = env("GOOGLE_CLIENT_SECRET", default="")
 GOOGLE_REDIRECT_URI = env("GOOGLE_REDIRECT_URI", default="http://localhost:8000/api/auth/google/callback/")
 
 # ===================== CHANNELS =====================
-try:
-    import channels_redis  # noqa: F401
-    CHANNEL_LAYERS = {
-        "default": {
-            "BACKEND": "channels_redis.core.RedisChannelLayer",
-            "CONFIG": {"hosts": [("127.0.0.1", 6379)]},
-        },
+# try:
+#     import channels_redis  # noqa: F401
+#     CHANNEL_LAYERS = {
+#         "default": {
+#             "BACKEND": "channels_redis.core.RedisChannelLayer",
+#             "CONFIG": {"hosts": [("127.0.0.1", 6379)]},
+#         },
+#     }
+# except Exception:
+#     import warnings
+#     warnings.warn("channels_redis not available — using InMemoryChannelLayer (development only)")
+#     CHANNEL_LAYERS = {
+#         "default": {
+#             "BACKEND": "channels.layers.InMemoryChannelLayer",
+#         }
+#     }
+
+# Temporary InMemory channel layer (Redis off)
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels.layers.InMemoryChannelLayer",
     }
-except Exception:
-    import warnings
-    warnings.warn("channels_redis not available — using InMemoryChannelLayer (development only)")
-    CHANNEL_LAYERS = {
-        "default": {
-            "BACKEND": "channels.layers.InMemoryChannelLayer",
-        }
-    }
+}
 
 # ===================== OTHER =====================
 LANGUAGE_CODE = "en-us"

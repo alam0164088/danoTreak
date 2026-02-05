@@ -1,4 +1,3 @@
-
 #  authetication/models
 from django.conf import settings
 from django.db import models
@@ -162,6 +161,11 @@ class Vendor(models.Model):
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    # নতুন ফিল্ড
+    website = models.URLField(blank=True, null=True)
+    # Optional thumbnail image; used as response thumbnail when set
+    thumbnail_image = models.ImageField(upload_to='vendor_thumbnail/', null=True, blank=True)
 
     def __str__(self):
         return self.shop_name
