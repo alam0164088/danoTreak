@@ -1013,6 +1013,12 @@ class CompleteVendorProfileView(APIView):
         if hasattr(vendor, "thumbnail_image") and getattr(vendor, "thumbnail_image"):
             try:
                 thumbnail_url = request.build_absolute_uri(vendor.thumbnail_image.url)
+                # remove thumbnail from shop_images list if present (match by filename)
+                try:
+                    thumb_name = vendor.thumbnail_image.name
+                    shop_images_full = [s for s in shop_images_full if not s.endswith(thumb_name)]
+                except Exception:
+                    pass
             except Exception:
                 thumbnail_url = None
         elif shop_images_full:
@@ -1219,6 +1225,11 @@ class CompleteVendorProfileView(APIView):
         if hasattr(vendor, "thumbnail_image") and getattr(vendor, "thumbnail_image"):
             try:
                 thumbnail_url = request.build_absolute_uri(vendor.thumbnail_image.url)
+                try:
+                    thumb_name = vendor.thumbnail_image.name
+                    shop_images_full = [s for s in shop_images_full if not s.endswith(thumb_name)]
+                except Exception:
+                    pass
             except Exception:
                 thumbnail_url = None
         # If no explicit thumbnail, fallback to first shop image
