@@ -1345,7 +1345,7 @@ class VendorProfileUpdateRequestView(APIView):
                 "message": "ভেন্ডর প্রোফাইল পাওয়া যায়নি। প্রথমে প্রোফাইল কমপ্লিট করুন।"
             }, status=404)
 
-        data = request.data.copy()
+        data = request.data
         files = request.FILES
 
         allowed_fields = [
