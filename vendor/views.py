@@ -245,19 +245,34 @@ def create_campaign(request):
     if not vendor:
         return Response({"error": "Vendor profile not found"}, status=403)
 
+    # normalize required_visits
+    rv = request.data.get('required_visits', 5)
+    try:
+        required_visits = int(rv)
+    except Exception:
+        required_visits = 5
+
+    # normalize is_active (accept boolean or common strings)
+    is_active_raw = request.data.get('is_active', True)
+    if isinstance(is_active_raw, str):
+        is_active = is_active_raw.strip().lower() in ('true', '1', 'yes', 'on')
+    else:
+        is_active = bool(is_active_raw)
+
     campaign = Campaign.objects.create(
         vendor=vendor,
         name=request.data.get('name'),
-        required_visits=int(request.data.get('required_visits', 5)),
+        required_visits=required_visits,
         reward_name=request.data.get('reward_name'),
         reward_description=request.data.get('reward_description', ''),
-        is_active=request.data.get('is_active', True)
+        is_active=is_active
     )
 
     # save uploaded image to Campaign.image if provided (key: 'image')
     if 'image' in request.FILES and request.FILES['image']:
         f = request.FILES['image']
-        campaign.image.save(f"{uuid4().hex}{os.path.splitext(f.name)[1]}", ContentFile(f.read()), save=True)
+        filename = f"{uuid.uuid4().hex}{os.path.splitext(f.name)[1]}"
+        campaign.image.save(filename, ContentFile(f.read()), save=True)
 
     resp = {"message": "Campaign created", "id": campaign.id}
     if campaign.image:
