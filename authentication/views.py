@@ -1238,30 +1238,31 @@ class CompleteVendorProfileView(APIView):
             thumbnail_url = shop_images_full[0]
 
         response_payload = {
-            "success": True,
-            "profile_complete": vendor.is_profile_complete,
-            "message": "Profile completed successfully!",
-            "vendor": {
-                "id": vendor.id,
-                "vendor_name": vendor.vendor_name or "",
-                "shop_name": vendor.shop_name or "",
-                "phone_number": vendor.phone_number or "",
-                "shop_address": vendor.shop_address or "",
-                "category": vendor.category or "",
-                "latitude": float(vendor.latitude) if vendor.latitude else None,
-                "longitude": float(vendor.longitude) if vendor.longitude else None,
-                "thumbnail_image": thumbnail_url,
-                "shop_images": shop_images_full,
-                "description": vendor.description or "",
-                "website": vendor.website or "",
-                "activities": vendor.activities or [],
-                "rating": float(vendor.rating) if vendor.rating else 0.0,
-                "review_count": vendor.review_count or 0,
-                "nid_front": request.build_absolute_uri(vendor.nid_front.url) if vendor.nid_front else None,
-                "nid_back": request.build_absolute_uri(vendor.nid_back.url) if vendor.nid_back else None,
-                "trade_license": request.build_absolute_uri(vendor.trade_license.url) if vendor.trade_license else None,
-            }
-        }
+            "vendor_id": vendor.id,
+             "success": True,
+             "profile_complete": vendor.is_profile_complete,
+             "message": "Profile completed successfully!",
+             "vendor": {
+                 "id": vendor.id,
+                 "vendor_name": vendor.vendor_name or "",
+                 "shop_name": vendor.shop_name or "",
+                 "phone_number": vendor.phone_number or "",
+                 "shop_address": vendor.shop_address or "",
+                 "category": vendor.category or "",
+                 "latitude": float(vendor.latitude) if vendor.latitude else None,
+                 "longitude": float(vendor.longitude) if vendor.longitude else None,
+                 "thumbnail_image": thumbnail_url,
+                 "shop_images": shop_images_full,
+                 "description": vendor.description or "",
+                 "website": vendor.website or "",
+                 "activities": vendor.activities or [],
+                 "rating": float(vendor.rating) if vendor.rating else 0.0,
+                 "review_count": vendor.review_count or 0,
+                 "nid_front": request.build_absolute_uri(vendor.nid_front.url) if vendor.nid_front else None,
+                 "nid_back": request.build_absolute_uri(vendor.nid_back.url) if vendor.nid_back else None,
+                 "trade_license": request.build_absolute_uri(vendor.trade_license.url) if vendor.trade_license else None,
+             }
+         }
 
         # Add debug info when DEBUG is True so we can see what arrived vs what was saved
         if getattr(settings, 'DEBUG', False):
@@ -2576,4 +2577,4 @@ def google_login_view(request):
 
 
 
-# 
+#
