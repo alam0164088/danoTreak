@@ -1111,9 +1111,7 @@ class CompleteVendorProfileView(APIView):
         if has_new_shop_images:
             shop_images = []
 
-        # Shop Images
-        shop_images = vendor.shop_images or []
-        # Quick debug info about uploaded files
+    # Quick debug info about uploaded files
         try:
             uploaded_keys = list(request.FILES.keys())
             # Count total files uploaded (supports repeated keys)
@@ -1216,24 +1214,39 @@ class CompleteVendorProfileView(APIView):
                     shop_images_full.append(img)
                 else:
                     shop_images_full.append(f"{base_url}{img}")
+        # Build response like GET so POST returns the same structure
+        thumbnail_url = None
+        if hasattr(vendor, "thumbnail_image") and getattr(vendor, "thumbnail_image"):
+            try:
+                thumbnail_url = request.build_absolute_uri(vendor.thumbnail_image.url)
+            except Exception:
+                thumbnail_url = None
+        # If no explicit thumbnail, fallback to first shop image
+        if not thumbnail_url and shop_images_full:
+            thumbnail_url = shop_images_full[0]
 
         response_payload = {
             "success": True,
+            "profile_complete": vendor.is_profile_complete,
             "message": "Profile completed successfully!",
             "vendor": {
-                "vendor_name": vendor.vendor_name,
-                "shop_name": vendor.shop_name,
-                "phone_number": vendor.phone_number,
-                "shop_address": vendor.shop_address,
-                "category": vendor.category,
+                "id": vendor.id,
+                "vendor_name": vendor.vendor_name or "",
+                "shop_name": vendor.shop_name or "",
+                "phone_number": vendor.phone_number or "",
+                "shop_address": vendor.shop_address or "",
+                "category": vendor.category or "",
                 "latitude": float(vendor.latitude) if vendor.latitude else None,
                 "longitude": float(vendor.longitude) if vendor.longitude else None,
+                "thumbnail_image": thumbnail_url,
                 "shop_images": shop_images_full,
-                "website": vendor.website,
-                "description": vendor.description,
-                "activities": vendor.activities,
-                "rating": float(vendor.rating),
-                "review_count": vendor.review_count,
+                "description": vendor.description or "",
+                "activities": vendor.activities or [],
+                "rating": float(vendor.rating) if vendor.rating else 0.0,
+                "review_count": vendor.review_count or 0,
+                "nid_front": request.build_absolute_uri(vendor.nid_front.url) if vendor.nid_front else None,
+                "nid_back": request.build_absolute_uri(vendor.nid_back.url) if vendor.nid_back else None,
+                "trade_license": request.build_absolute_uri(vendor.trade_license.url) if vendor.trade_license else None,
             }
         }
 
