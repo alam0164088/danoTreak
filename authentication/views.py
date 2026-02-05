@@ -1252,6 +1252,7 @@ class CompleteVendorProfileView(APIView):
                 "thumbnail_image": thumbnail_url,
                 "shop_images": shop_images_full,
                 "description": vendor.description or "",
+                "website": vendor.website or "",
                 "activities": vendor.activities or [],
                 "rating": float(vendor.rating) if vendor.rating else 0.0,
                 "review_count": vendor.review_count or 0,
@@ -1350,7 +1351,7 @@ class VendorProfileUpdateRequestView(APIView):
             'shop_name', 'vendor_name', 'phone_number', 'shop_address',
             'category', 'latitude', 'longitude',
             'rating', 'review_count',
-            'description', 'activities'
+            'description', 'activities', 'website'
         ]
 
         new_data = {}
@@ -1422,6 +1423,15 @@ class VendorProfileUpdateRequestView(APIView):
                 filename = f"update_{uuid.uuid4().hex}{ext}"
                 path = default_storage.save(f'vendor_update_docs/shop_images/{filename}', ContentFile(file.read()))
                 uploaded_shop_images.append(request.build_absolute_uri(settings.MEDIA_URL + path))
+
+        # Optional thumbnail upload for update request: save and include in new_data
+        if files.get('thumbnail_image'):
+            tfile = files.get('thumbnail_image')
+            ext = os.path.splitext(tfile.name)[1].lower()
+            if ext in ['.jpg', '.jpeg', '.png', '.webp', '.gif']:
+                tname = f"thumbnail_{uuid.uuid4().hex}{ext}"
+                tpath = default_storage.save(f'vendor_update_docs/thumbnail/{tname}', ContentFile(tfile.read()))
+                new_data['thumbnail_image'] = request.build_absolute_uri(settings.MEDIA_URL + tpath)
 
         # === রিকোয়েস্ট সেভ করা ===
         update_request = VendorProfileUpdateRequest.objects.create(
