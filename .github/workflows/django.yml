@@ -54,16 +54,16 @@ jobs:
           ssh-keyscan -H $SSH_HOST >> ~/.ssh/known_hosts
 
           # 🚀 Deploy on server
-          ssh -i ~/.ssh/id_rsa $SSH_USER@$SSH_HOST << 'EOF'
+            ssh -i ~/.ssh/id_rsa $SSH_USER@$SSH_HOST <<'EOF'
             set -xe
-            cd /home/ubuntu/danoTreak
-            git fetch --all
-            git reset --hard origin/main
-            source venv/bin/activate
-            pip install -r requirements.txt
-            python manage.py migrate --noinput
-            python manage.py collectstatic --noinput
-            sudo systemctl restart gunicorn
+            cd /home/***/danoTreak || { echo "dir not found"; exit 2; }
+            git fetch --all || { echo "git fetch failed"; exit 3; }
+            git reset --hard origin/main || { echo "git reset failed"; git status; exit 4; }
+            source venv/bin/activate || { echo "venv missing"; exit 5; }
+            pip install -r requirements.txt || { echo "pip install failed"; exit 6; }
+            python manage.py migrate --noinput || { echo "migrate failed"; exit 7; }
+            python manage.py collectstatic --noinput || { echo "collectstatic failed"; exit 8; }
+            sudo -n systemctl restart gunicorn || { sudo journalctl -u gunicorn -n 200 --no-pager; exit 9; }
           EOF
 
 # fdfd
