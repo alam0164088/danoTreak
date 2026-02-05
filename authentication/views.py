@@ -1588,12 +1588,41 @@ class AdminPendingVendorUpdateRequestsView(APIView):
             new_images_count = len(req.shop_images) if req.shop_images else 0
             old_images_count = len(vendor.shop_images) if vendor.shop_images else 0
 
+            # Build absolute URLs for old & new images
             # ডকুমেন্ট URL
             documents = {
                 "nid_front": request.build_absolute_uri(req.nid_front.url) if req.nid_front else None,
                 "nid_back": request.build_absolute_uri(req.nid_back.url) if req.nid_back else None,
                 "trade_license": request.build_absolute_uri(req.trade_license.url) if req.trade_license else None,
             }
+
+            # old images absolute URLs
+            old_images_full = []
+            for img in (vendor.shop_images or []):
+                if img and str(img).startswith('http'):
+                    old_images_full.append(img)
+                elif img:
+                    old_images_full.append(request.build_absolute_uri(img))
+
+            # new images absolute URLs (update request stores full URL in most flows)
+            new_images_full = []
+            for img in (req.shop_images or []):
+                if img and str(img).startswith('http'):
+                    new_images_full.append(img)
+                elif img:
+                    new_images_full.append(request.build_absolute_uri(img))
+
+            # thumbnails
+            old_thumbnail = None
+            try:
+                if getattr(vendor, 'thumbnail_image', None):
+                    old_thumbnail = request.build_absolute_uri(vendor.thumbnail_image.url)
+            except Exception:
+                old_thumbnail = None
+
+            new_thumbnail = new_data.get('thumbnail_image') if new_data.get('thumbnail_image') else None
+
+            images_changed = (old_images_full != new_images_full) or (old_thumbnail != new_thumbnail)
 
             request_list.append({
                 "request_id": req.id,
@@ -1609,10 +1638,15 @@ class AdminPendingVendorUpdateRequestsView(APIView):
                 "changes": changes,
                 "total_changes": len(changes),
 
-                # Images
+                # Images (provide old & new lists + quick preview and change flag)
                 "current_images": old_images_count,
                 "will_add_images": new_images_count,
-                "new_shop_images_preview": req.shop_images[:3] if req.shop_images else [],
+                "old_shop_images": old_images_full,
+                "new_shop_images": new_images_full,
+                "new_shop_images_preview": new_images_full[:3] if new_images_full else [],
+                "old_thumbnail": old_thumbnail,
+                "new_thumbnail": new_thumbnail,
+                "images_changed": images_changed,
 
                 # Documents
                 "has_documents": bool(req.nid_front or req.nid_back or req.trade_license),
