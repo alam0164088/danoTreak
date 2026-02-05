@@ -2573,3 +2573,7 @@ def google_login_view(request):
     except Exception as e:
         logger.error(f"Google login error: {str(e)}", exc_info=True)
         return JsonResponse({"error": f"Login failed: {str(e)}"}, status=500)
+
+
+
+# 
