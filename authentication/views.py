@@ -1990,6 +1990,7 @@ def approve_vendor_update_request(request, request_id):
         'longitude': 'longitude',
         'rating': 'rating',
         'review_count': 'review_count',
+        'website': 'website',  # ← add website mapping
     }
 
     for key, attr in field_mapping.items():
@@ -2011,6 +2012,36 @@ def approve_vendor_update_request(request, request_id):
                 except:
                     continue
             setattr(vendor, attr, value)
+
+    # Handle thumbnail if vendor update provided a thumbnail URL in new_data
+    if 'thumbnail_image' in new_data and new_data.get('thumbnail_image'):
+        try:
+            thumb_url = new_data.get('thumbnail_image')
+            from urllib.parse import urlparse
+            parsed = urlparse(thumb_url)
+            media_path = parsed.path.lstrip('/')  # e.g. media/vendor_update_docs/thumbnail/xxx.jpg or vendor_update_docs/...
+            # normalize if MEDIA_URL prefixed
+            media_prefix = settings.MEDIA_URL.lstrip('/')
+            if media_path.startswith(media_prefix):
+                rel = media_path[len(media_prefix):].lstrip('/')
+            else:
+                rel = media_path
+
+            # read original file and save into vendor.thumbnail_image
+            if default_storage.exists(rel):
+                with default_storage.open(rel, 'rb') as f:
+                    content = f.read()
+                filename = os.path.basename(rel)
+                dest = f"vendor_thumbnail/{uuid.uuid4().hex}_{filename}"
+                saved = default_storage.save(dest, ContentFile(content))
+                # save to ImageField (will store under MEDIA_ROOT/vendor_thumbnail/...)
+                try:
+                    vendor.thumbnail_image.save(os.path.basename(saved), ContentFile(content), save=False)
+                except Exception:
+                    # fallback: set URL in new_data (not ideal)
+                    pass
+        except Exception:
+            pass
 
     # Add new shop images if any
     if update_request.shop_images:
