@@ -1334,7 +1334,7 @@ class VendorProfileUpdateRequestView(APIView):
         if request.user.role != 'vendor':
             return Response({
                 "success": False,
-                "message": "Only vendors are allowed to perform this action."
+                "message": "Only vendors can request profile updates."
             }, status=403)
 
         try:
@@ -1552,7 +1552,8 @@ class AdminPendingVendorUpdateRequestsView(APIView):
                 'category': ('Category', vendor.category or "Not provided"),
                 'description': ('Description', vendor.description or "Not provided"),
                 'activities': ('Activities', ", ".join(vendor.activities) if vendor.activities else "Not provided"),
-                'rating': ('Rating', float(vendor.rating) if v.vendor_rating else 0.0),
+                # safe access to vendor.rating (avoid undefined variable 'v')
+                'rating': ('Rating', float(getattr(vendor, 'rating', 0.0)) if getattr(vendor, 'rating', None) is not None else 0.0),
                 'review_count': ('Review Count', vendor.review_count if vendor.review_count else 0),
             }
 
@@ -1930,6 +1931,8 @@ class NotificationSerializer(serializers.ModelSerializer):
 
 class NotificationListAPI(APIView):
     permission_classes = [IsAuthenticated]
+
+   
 
     def get(self, request):
         qs = Notification.objects.filter(user=request.user).order_by("-created_at")
