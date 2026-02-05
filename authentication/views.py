@@ -1027,8 +1027,9 @@ class CompleteVendorProfileView(APIView):
         return Response({
             "success": True,
             "profile_complete": vendor.is_profile_complete,
+            "vendor_id": vendor.user.id,              # use registration (user) id consistently
             "vendor": {
-                "id": vendor.id,
+                "id": vendor.user.id,
                 "vendor_name": vendor.vendor_name or "",
                 "shop_name": vendor.shop_name or "",
                 "phone_number": vendor.phone_number or "",
@@ -1478,7 +1479,8 @@ class VendorProfileUpdateRequestView(APIView):
             "status": update_request.status,
             "requested_changes": new_data,
             "uploaded_shop_images_count": len(uploaded_shop_images),
-            "shop_images": uploaded_shop_images[:3]
+            "shop_images": uploaded_shop_images[:3],
+            "vendor_id": vendor.user.id
         }, status=201)
 
     def get(self, request):
@@ -2178,7 +2180,7 @@ def approve_vendor_update_request(request, request_id):
         "success": True,
         "message": "Vendor profile update approved successfully",
         "request_id": request_id,
-        "vendor_id": vendor.id,
+        "vendor_id": vendor.user.id,
         "shop_name": vendor.shop_name
     }, status=200)
 
@@ -2229,7 +2231,8 @@ def reject_vendor_update_request(request, request_id):
         "success": True,
         "message": "Vendor profile update rejected",
         "request_id": request_id,
-        "reason": reason
+        "reason": reason,
+        "vendor_id": update_request.vendor.user.id
     }, status=200)
 
 
@@ -2574,7 +2577,3 @@ def google_login_view(request):
     except Exception as e:
         logger.error(f"Google login error: {str(e)}", exc_info=True)
         return JsonResponse({"error": f"Login failed: {str(e)}"}, status=500)
-
-
-
-#
