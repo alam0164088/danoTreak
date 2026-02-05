@@ -1477,7 +1477,7 @@ class VendorProfileUpdateRequestView(APIView):
             "status": update_request.status,
             "requested_changes": new_data,
             "uploaded_shop_images_count": len(uploaded_shop_images),
-            "preview_images": uploaded_shop_images[:3]
+            "shop_images": uploaded_shop_images[:3]
         }, status=201)
 
     def get(self, request):
