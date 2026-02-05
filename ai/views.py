@@ -13,6 +13,21 @@ import time
 import logging
 logger = logging.getLogger(__name__)
 
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
+# shared requests session with retries
+_session = None
+def _get_session():
+    global _session
+    if _session is None:
+        s = requests.Session()
+        retries = Retry(total=2, backoff_factor=1, status_forcelist=[429, 500, 502, 503, 504], allowed_methods=["HEAD","GET","POST"])
+        s.mount("https://", HTTPAdapter(max_retries=retries))
+        s.mount("http://", HTTPAdapter(max_retries=retries))
+        _session = s
+    return _session
+
 # ===============================
 # Haversine distance
 # ===============================
@@ -31,17 +46,16 @@ BASE_AI_URL = "https://ai.trekbotai.com"  # API base (no /docs)
 _ai_cache = {"online": None, "checked_at": 0}
 
 def is_ai_online():
-    """AI সার্ভার অনলাইন কিনা চেক (30 সেকেন্ড cache)"""
+    """Check AI server quickly (30s cache)."""
     now = time.time()
     if _ai_cache["online"] is not None and (now - _ai_cache["checked_at"]) < 30:
         return _ai_cache["online"]
-    
     try:
-        r = requests.get(f"{BASE_AI_URL}/", timeout=2)
+        s = _get_session()
+        r = s.get(f"{BASE_AI_URL.rstrip('/')}/", timeout=3)
         online = r.status_code < 500
-    except:
+    except requests.RequestException:
         online = False
-    
     _ai_cache["online"] = online
     _ai_cache["checked_at"] = now
     return online
@@ -69,34 +83,35 @@ def get_cache_key(endpoint, payload):
 # ✅ AI API Call (Cache DISABLED)
 # ===============================
 def call_ai_api(endpoint, payload, token, timeout=100):
-    """AI সার্ভারে POST request (cache disabled)"""
-    # cache_key = get_cache_key(endpoint, payload)
-    # cached = cache.get(cache_key)
-    # if cached:
-    #     return cached, 200
+    """POST to AI server with retries and robust error handling."""
+    headers = {}
+    if token:
+        try:
+            token_value = getattr(token, "key", None) or str(token)
+        except Exception:
+            token_value = str(token)
+        if token_value:
+            headers["Authorization"] = f"Bearer {token_value}"
+    url = f"{BASE_AI_URL.rstrip('/')}/{endpoint.lstrip('/')}"
+    logger.info("AI CALL -> URL: %s, payload: %s", url, payload)
     try:
-        headers = {}
-        if token:
-            try:
-                token_value = getattr(token, 'key', None) or str(token)
-            except Exception:
-                token_value = str(token)
-            if token_value:
-                headers["Authorization"] = f"Bearer {token_value}"
-        url = f"{BASE_AI_URL.rstrip('/')}/{endpoint.lstrip('/')}"
-        logger.info("AI CALL -> URL: %s, payload: %s", url, payload)
-        r = requests.post(url, json=payload, headers=headers, timeout=timeout)
+        s = _get_session()
+        r = s.post(url, json=payload, headers=headers, timeout=timeout)
+        text = r.text or ""
+        # try parse JSON, otherwise return reasonable raw_text
         try:
             data = r.json() if r.content else {}
         except Exception as e:
-            logger.error("AI response parse error: %s ; text: %s", e, r.text)
-            data = {"raw_text": r.text}
+            logger.debug("AI response parse error: %s", e)
+            data = {"raw_text": text[:2000]}
 
-        # if 200 <= r.status_code < 300 and data:
-        #     cache.set(cache_key, data, timeout=600)
+        # If upstream returned HTML 5xx (gateway/timeouts) convert to structured error
+        if r.status_code >= 500:
+            return {"error": f"AI server returned {r.status_code}", "raw_text": text[:2000]}, r.status_code
 
         return data, r.status_code
     except requests.Timeout:
+        logger.warning("AI request timed out")
         return {"error": "AI server timeout"}, 504
     except requests.ConnectionError:
         logger.warning("AI server connection error")
