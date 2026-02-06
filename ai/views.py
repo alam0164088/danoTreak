@@ -272,18 +272,18 @@ class CategoryNearbyAI(APIView):
         # ✅ Sort
         vendors_list.sort(key=lambda x: (0 if x.get("source") == "db" else 1, x.get("distance_meters", 1e9)))
 
+        # Build response with cityHistory placed before vendors (when available for 'place')
         response_payload = {
             "success": True,
             "your_location": {"lat": user_lat, "lng": user_lng},
             "search_radius_meters": 5000,
             "category": category,
             "total_found": len(vendors_list),
+            # include cityHistory at top-level (only for 'place' and only if AI provided it)
+            **({"cityHistory": ai_city_history} if category == "place" and ai_city_history else {}),
             "vendors": vendors_list,
             "ai_server": ai_info
         }
-        # Only include cityHistory for 'place' category when provided by AI
-        if category == "place" and ai_city_history:
-            response_payload["cityHistory"] = ai_city_history
 
         return Response(response_payload, status=200)
 
