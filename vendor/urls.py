@@ -1,6 +1,7 @@
 # vendor/urls.py
 from django.urls import path
 from . import views
+from .views import my_referral_list
 
 urlpatterns = [
     path('dashboard/', views.dashboard_overview),
@@ -23,7 +24,7 @@ urlpatterns = [
     path('dashboard/stats/', views.DashboardStatsView.as_view(), name='dashboard-stats'),
     path('users-vendors/list/', views.UserAndVendorListView.as_view(), name='users_vendors_list'),
     path('campaign-redemption-report/', views.CampaignRedemptionReportView.as_view(), name='campaign_redemption_report'),
-    path('referral/my-list/', views.my_referral_list, name='my_referral_list'),
+    path('referral/my-list/', my_referral_list, name='my_referral_list'),
     
 
 ]
