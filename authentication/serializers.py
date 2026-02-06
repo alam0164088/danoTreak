@@ -10,30 +10,38 @@ from datetime import timedelta
 
 class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, min_length=8)
-    password_confirm = serializers.CharField(write_only=True, min_length=8)
-    send_verification_otp = serializers.BooleanField(default=True, write_only=True)
-    role = serializers.ChoiceField(choices=User.ROLE_CHOICES, default='user', required=False)
-    # Allow any phone value and make it optional
-    phone = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    password_confirm = serializers.CharField(write_only=True)
+    send_verification_otp = serializers.BooleanField(required=False, default=False, write_only=True)
+    
+    # ✅ FIX: referral_code কে Model ফিল্ড থেকে আলাদা করো
+    # এটা "কার রেফারেল ব্যবহার করছি" — নতুন ইউজারের নিজের code না
+    referral_code = serializers.CharField(required=False, allow_blank=True, write_only=True)
 
     class Meta:
         model = User
-        fields = ['email', 'password', 'password_confirm', 'full_name', 'phone', 
-                  'send_verification_otp', 'role', 'referral_code']
+        fields = ['email', 'password', 'password_confirm', 'full_name', 'phone',
+                  'send_verification_otp', 'referral_code']
+        extra_kwargs = {
+            'password': {'write_only': True},
+        }
 
-    def validate(self, data):
-        # Password match
-        if data['password'] != data['password_confirm']:
-            raise serializers.ValidationError({"password": "Passwords do not match."})
-
+    def validate(self, attrs):
+        if attrs.get('password') != attrs.get('password_confirm'):
+            raise serializers.ValidationError({"password_confirm": "Passwords do not match."})
+        
+        # ✅ referral_code আলাদা করে রাখো — model এ সরাসরি যাবে না
+        self._used_referral_code = attrs.pop('referral_code', None)
+        attrs.pop('password_confirm', None)
+        attrs.pop('send_verification_otp', None)
+        
         # Password complexity
-        if not re.match(r'^(?=.*[A-Za-z])(?=.*\d)(?=.*[@$!%*#?&])[A-Za-z\d@$!%*#?&]{8,}$', data['password']):
+        if not re.match(r'^(?=.*[A-Za-z])(?=.*\d)(?=.*[@$!%*#?&])[A-Za-z\d@$!%*#?&]{8,}$', attrs['password']):
             raise serializers.ValidationError({
                 "password": "Password must be at least 8 characters long and contain letters, numbers, and special characters."
             })
 
         # Role validation
-        role = data.get('role')
+        role = attrs.get('role')
         request_user = self.context['request'].user if 'request' in self.context else None
         if role in ['admin', 'vendor']:
             if not request_user or not request_user.is_authenticated:
@@ -41,26 +49,30 @@ class RegisterSerializer(serializers.ModelSerializer):
             if request_user.role != 'admin':
                 raise serializers.ValidationError({"role": "Only admins can assign 'admin' or 'vendor' roles."})
 
-        return data
+        return attrs
 
     def create(self, validated_data):
-        password = validated_data.pop('password')
+        # ✅ Safety: এগুলো যদি এখনও থাকে তাহলে সরাও
+        validated_data.pop('referral_code', None)
         validated_data.pop('password_confirm', None)
-        send_otp = validated_data.pop('send_verification_otp', True)
+        validated_data.pop('send_verification_otp', None)
 
-        user = User.objects.create_user(
-            email=validated_data['email'],
-            password=password,
-            full_name=validated_data.get('full_name', ''),
-            phone=validated_data.get('phone', ''),
-            role=validated_data.get('role', 'user'),
-            referral_code=validated_data.get('referral_code', None)
-        )
+        password = validated_data.pop('password')
+        user = User(**validated_data)
+        user.set_password(password)
+        # ✅ user.referral_code অটো generate হবে model save() এ — আমরা সেট করছি না
+        
+        # ✅ referred_by সেট করো (কার referral code ব্যবহার করেছে)
+        used_code = getattr(self, '_used_referral_code', None)
+        if used_code and str(used_code).strip():
+            used_code = str(used_code).strip()
+            try:
+                referrer = User.objects.get(referral_code=used_code)
+                user.referred_by = referrer
+            except User.DoesNotExist:
+                pass  # invalid code — silently ignore
 
-        # OTP generate
-        if send_otp:
-            user.generate_email_verification_code()
-
+        user.save()
         return user
 
 
