@@ -1239,12 +1239,12 @@ class CompleteVendorProfileView(APIView):
             thumbnail_url = shop_images_full[0]
 
         response_payload = {
-            "vendor_id": vendor.id,
+            "vendor_id": vendor.user.id,
              "success": True,
              "profile_complete": vendor.is_profile_complete,
              "message": "Profile completed successfully!",
              "vendor": {
-                 "id": vendor.id,
+                "id": vendor.user.id,
                  "vendor_name": vendor.vendor_name or "",
                  "shop_name": vendor.shop_name or "",
                  "phone_number": vendor.phone_number or "",
@@ -1629,7 +1629,7 @@ class AdminPendingVendorUpdateRequestsView(APIView):
 
             request_list.append({
                 "request_id": req.id,
-                "vendor_id": vendor.id,
+                "vendor_id": vendor.user.id,
                 "vendor_email": vendor.user.email,
                 "shop_name": vendor.shop_name or "Name not provided",
                 "phone_number": vendor.phone_number or "not provided",
@@ -1831,7 +1831,7 @@ def user_nearby_vendors(request):
         # ২ কিলোমিটারের মধ্যে
         if distance_meters <= 2000:
             nearby_vendors.append({
-                "id": vendor.id,
+                "id": vendor.user.id,
                 "vendor_name": vendor.vendor_name or "N/A",
                 "shop_name": vendor.shop_name or "N/A",
                 "phone_number": vendor.phone_number or "N/A",
@@ -1945,7 +1945,7 @@ class AdminAllVendorCredentialsView(APIView):
         for vendor in vendors:
             if vendor.plain_password:  # যাদের পাসওয়ার্ড সেভ আছে
                 credentials.append({
-                    "vendor_id": vendor.id,
+                    "vendor_id": vendor.user.id,
                     "shop_name": vendor.shop_name if vendor.shop_name != "N/A" else "not given name",
                     "email": vendor.user.email,
                     "password": vendor.plain_password,  # প্লেইন টেক্সট পাসওয়ার্ড
@@ -2347,6 +2347,7 @@ class GoogleLoginView(APIView):
                     "id": user.id,
                     "email": user.email,
                     "full_name": user.full_name or "",
+                    "phone": user.phone or "",
                     "profile_image": request.build_absolute_uri(profile.image.url) if profile.image else None,
                 }
             }, status=200)
