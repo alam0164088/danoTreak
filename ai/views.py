@@ -245,9 +245,9 @@ class CategoryNearbyAI(APIView):
                     
                     for ai in ai_items:
                         ai_id = ai.get("id") or str(uuid.uuid4())
-                        # ✅ AI vendor এর জন্যও thumbnail_image (প্রথম ফটো)
                         ai_photos = [p.get("photo_url") for p in ai.get("photos", []) if p.get("photo_url")]
-                        vendors_list.append({
+
+                        ai_payload = {
                             "id": ai_id,
                             "vendor_name": ai.get("name") or "N/A",
                             "shop_name": ai.get("name") or "N/A",
@@ -267,7 +267,11 @@ class CategoryNearbyAI(APIView):
                                 "longitude": ai.get("location", {}).get("lng", 0)
                             },
                             "source": "ai"
-                        })
+                        }
+
+                        _cache_ai_vendor(ai_id, ai_payload)
+
+                        vendors_list.append(ai_payload)
                 else:
                     ai_info = {"status": "error", "message": data.get("error", "Unknown")}
             except Exception as e:
@@ -626,6 +630,7 @@ def get_vendor_info(fav):
             "has_full_data": bool(data)
         }
     return None
+
 # Toggle Favorite Vendor
 class ToggleFavoriteVendor(APIView):
     permission_classes = [IsAuthenticated]
@@ -650,7 +655,20 @@ class ToggleFavoriteVendor(APIView):
                 favorite.delete()
                 return Response({"success": True, "message": "Removed from favorites", "is_favorite": False, "vendor": vendor_data})
 
-            ai_data = request.data.get("ai_vendor_data", {})
+            ai_data = request.data.get("ai_vendor_data") or request.data.get("vendor") or {}
+            if not ai_data:
+                ai_data = cache.get(f"ai_vendor:{vendor_id}") or {}
+
+            loc = ai_data.get("location") or {}
+            lat = loc.get("latitude") or loc.get("lat") or ai_data.get("latitude") or ai_data.get("lat")
+            lng = loc.get("longitude") or loc.get("lng") or ai_data.get("longitude") or ai_data.get("lng")
+            if lat is None or lng is None:
+                return Response({"success": False, "message": "ai_vendor_data not found in cache"}, status=400)
+
+            ai_data["location"] = {"latitude": float(lat), "longitude": float(lng)}
+            ai_data.setdefault("shop_images", [])
+            ai_data.setdefault("thumbnail_image", ai_data["shop_images"][0] if ai_data["shop_images"] else None)
+
             favorite = FavoriteVendor.objects.create(
                 user=user,
                 ai_vendor_id=str(vendor_id),
