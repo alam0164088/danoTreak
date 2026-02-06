@@ -227,6 +227,7 @@ class CategoryNearbyAI(APIView):
 
         # ✅ AI vendors
         ai_info = {"status": "skipped"}
+        ai_city_history = None
 
         if is_ai_online():
             try:
@@ -236,6 +237,8 @@ class CategoryNearbyAI(APIView):
                 if code == 200 and data and isinstance(data, dict):
                     ai_items = data.get(CATEGORY_KEY_MAP.get(category, category), [])
                     ai_info = {"status": "success", "count": len(ai_items)}
+                    # extract city history (AI may return cityHistory or city_history)
+                    ai_city_history = data.get("cityHistory") or data.get("city_history")
                     
                     for ai in ai_items:
                         ai_id = ai.get("id") or str(uuid.uuid4())
@@ -269,7 +272,7 @@ class CategoryNearbyAI(APIView):
         # ✅ Sort
         vendors_list.sort(key=lambda x: (0 if x.get("source") == "db" else 1, x.get("distance_meters", 1e9)))
 
-        return Response({
+        response_payload = {
             "success": True,
             "your_location": {"lat": user_lat, "lng": user_lng},
             "search_radius_meters": 5000,
@@ -277,7 +280,12 @@ class CategoryNearbyAI(APIView):
             "total_found": len(vendors_list),
             "vendors": vendors_list,
             "ai_server": ai_info
-        }, status=200)
+        }
+        # Only include cityHistory for 'place' category when provided by AI
+        if category == "place" and ai_city_history:
+            response_payload["cityHistory"] = ai_city_history
+
+        return Response(response_payload, status=200)
 
 
 # ===============================
