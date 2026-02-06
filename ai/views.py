@@ -140,7 +140,6 @@ class AIThrottle(UserRateThrottle):
 class CategoryNearbyAI(APIView):
     permission_classes = [IsUser]
     throttle_classes = [AIThrottle]
-    # ✅ "itinerary" এখানে যোগ করা হয়েছে
     ALLOWED_CATEGORIES = ["place", "restaurant", "beverage", "lodging", "activities", "itinerary"]
 
     def post(self, request):
@@ -149,7 +148,7 @@ class CategoryNearbyAI(APIView):
             return Response({"success": False, "message": "Location not found. Please update your profile."}, status=400)
 
         category = request.data.get("category", "").lower().strip()
-        user_input = request.data.get("user_input", "") # Itinerary এর জন্য ইউজার ইনপুট (যেমন: দিন সংখ্যা)
+        user_input = request.data.get("user_input", "")
 
         if category not in self.ALLOWED_CATEGORIES:
             return Response({
@@ -164,29 +163,25 @@ class CategoryNearbyAI(APIView):
             if not is_ai_online():
                 return Response({"success": False, "message": "AI server is offline, please try again later."}, status=503)
             
-            # Payload for Itinerary
             payload = {
                 "category": category,
                 "latitude": user_lat,
                 "longitude": user_lng,
-                "user_input": user_input  # "3 days plan" বা এই ধরণের ইনপুট
+                "user_input": user_input
             }
 
-            # AI Call (endpoint আপনার AI সার্ভারের কনফিগারেশন অনুযায়ী হবে, এখানে ডিফল্ট রাখা হলো)
-            # যদি Itinerary এর জন্য আলাদা endpoint থাকে (যেমন /plan_trip), তবে "/get_location" চেঞ্জ করবেন।
             data, code = call_ai_api("/get_location", payload, request.auth, timeout=120)
 
             if code == 200:
-                # ✅ ডিরেক্ট রেসপন্স (কোনো ফরম্যাটিং ছাড়া)
                 return Response({
                     "success": True,
                     "category": category,
-                    "itinerary_data": data  # পুরো JSON এখানে চলে যাবে
+                    "itinerary_data": data
                 }, status=200)
             else:
                 return Response({
                     "success": False, 
-                    "message": "AI Itinerary জেনারেট করতে ব্যর্থ হয়েছে।",
+                    "message": "AI Itinerary জেনারেট করতে ব্যর্থ হয়েছে।",
                     "error_details": data
                 }, status=code)
 
@@ -207,6 +202,14 @@ class CategoryNearbyAI(APIView):
         for vendor in db_vendors:
             distance = haversine_distance(user_lat, user_lng, vendor.latitude, vendor.longitude)
             if distance <= 5000:
+                # ✅ thumbnail_image বের করা
+                thumbnail_url = None
+                if hasattr(vendor, 'thumbnail_image') and vendor.thumbnail_image:
+                    try:
+                        thumbnail_url = request.build_absolute_uri(vendor.thumbnail_image.url)
+                    except Exception:
+                        thumbnail_url = None
+
                 vendors_list.append({
                     "id": vendor.id,
                     "vendor_name": vendor.vendor_name or "N/A",
@@ -219,6 +222,7 @@ class CategoryNearbyAI(APIView):
                     "activities": vendor.activities or [],
                     "rating": float(vendor.rating) if vendor.rating else 0.0,
                     "review_count": vendor.review_count or 0,
+                    "thumbnail_image": thumbnail_url,
                     "shop_images": vendor.shop_images or [],
                     "distance_meters": round(distance, 1),
                     "location": {"latitude": float(vendor.latitude), "longitude": float(vendor.longitude)},
@@ -237,11 +241,12 @@ class CategoryNearbyAI(APIView):
                 if code == 200 and data and isinstance(data, dict):
                     ai_items = data.get(CATEGORY_KEY_MAP.get(category, category), [])
                     ai_info = {"status": "success", "count": len(ai_items)}
-                    # extract city history (AI may return cityHistory or city_history)
                     ai_city_history = data.get("cityHistory") or data.get("city_history")
                     
                     for ai in ai_items:
                         ai_id = ai.get("id") or str(uuid.uuid4())
+                        # ✅ AI vendor এর জন্যও thumbnail_image (প্রথম ফটো)
+                        ai_photos = [p.get("photo_url") for p in ai.get("photos", []) if p.get("photo_url")]
                         vendors_list.append({
                             "id": ai_id,
                             "vendor_name": ai.get("name") or "N/A",
@@ -254,7 +259,8 @@ class CategoryNearbyAI(APIView):
                             "activities": ai.get("features", "").split(", ") if ai.get("features") else [],
                             "rating": float(str(ai.get("rating", "0")).split("/")[0]) if ai.get("rating") else 0.0,
                             "review_count": ai.get("total_reviews", 0),
-                            "shop_images": [p.get("photo_url") for p in ai.get("photos", []) if p.get("photo_url")],
+                            "thumbnail_image": ai_photos[0] if ai_photos else None,
+                            "shop_images": ai_photos,
                             "distance_meters": round(float(ai.get("distance_km", 0)) * 1000, 1),
                             "location": {
                                 "latitude": ai.get("location", {}).get("lat", 0),
@@ -272,14 +278,12 @@ class CategoryNearbyAI(APIView):
         # ✅ Sort
         vendors_list.sort(key=lambda x: (0 if x.get("source") == "db" else 1, x.get("distance_meters", 1e9)))
 
-        # Build response with cityHistory placed before vendors (when available for 'place')
         response_payload = {
             "success": True,
             "your_location": {"lat": user_lat, "lng": user_lng},
             "search_radius_meters": 5000,
             "category": category,
             "total_found": len(vendors_list),
-            # include cityHistory at top-level (only for 'place' and only if AI provided it)
             **({"cityHistory": ai_city_history} if category == "place" and ai_city_history else {}),
             "vendors": vendors_list,
             "ai_server": ai_info
@@ -575,6 +579,13 @@ def get_vendor_info(fav):
         v = fav.vendor
         if not v.latitude or not v.longitude:
             return None
+        # ✅ thumbnail_image বের করা
+        thumbnail_url = None
+        if hasattr(v, 'thumbnail_image') and v.thumbnail_image:
+            try:
+                thumbnail_url = v.thumbnail_image.url
+            except Exception:
+                thumbnail_url = None
         return {
             "id": str(v.id),
             "shop_name": v.shop_name or "name not available",
@@ -582,7 +593,9 @@ def get_vendor_info(fav):
             "category": getattr(v, 'category', 'unknown'),
             "rating": float(v.rating) if v.rating else 0.0,
             "review_count": getattr(v, 'review_count', 0),
+            "thumbnail_image": thumbnail_url,
             "shop_image": v.shop_images[0] if v.shop_images else None,
+            "shop_images": v.shop_images or [],
             "phone": v.phone_number or "phone not available",
             "latitude": float(v.latitude),
             "longitude": float(v.longitude),
@@ -595,6 +608,7 @@ def get_vendor_info(fav):
         lat, lng = location.get("latitude"), location.get("longitude")
         if lat is None or lng is None:
             return None
+        ai_images = data.get("shop_images", [])
         return {
             "id": fav.ai_vendor_id,
             "shop_name": data.get("shop_name", "AI shop"),
@@ -602,7 +616,9 @@ def get_vendor_info(fav):
             "category": data.get("category", "place"),
             "rating": data.get("rating", 0.0),
             "review_count": data.get("review_count", 0),
-            "shop_image": data.get("shop_images", [None])[0],
+            "thumbnail_image": ai_images[0] if ai_images else None,
+            "shop_image": ai_images[0] if ai_images else None,
+            "shop_images": ai_images,
             "phone": data.get("phone_number", "phone not available"),
             "latitude": float(lat),
             "longitude": float(lng),
@@ -722,14 +738,13 @@ class NearbyCampaignVendorsAPI(APIView):
             return Response({"success": False, "message": "Your profile does not have location information. Please update it."}, status=400)
         
         user_lat, user_lng = profile.latitude, profile.longitude
-        max_distance_km = 5  # প্রয়োজনমতো পরিবর্তন করা যাবে
+        max_distance_km = 5
 
-        # Active campaign vendors
         vendors = Vendor.objects.filter(
-            campaigns__is_active=True,  # Campaign relation থেকে filter
+            campaigns__is_active=True,
             latitude__isnull=False,
             longitude__isnull=False
-        ).distinct()  # Duplicate vendors দূর করার জন্য
+        ).distinct()
 
         vendor_list = []
 
@@ -738,11 +753,9 @@ class NearbyCampaignVendorsAPI(APIView):
             if distance > max_distance_km:
                 continue
 
-            # Active campaigns নিয়ে আসা
             active_campaigns = v.campaigns.filter(is_active=True)
             campaigns_info = []
             for c in active_campaigns:
-                # build absolute image url if present
                 img_url = None
                 try:
                     if getattr(c, "image", None):
@@ -766,6 +779,14 @@ class NearbyCampaignVendorsAPI(APIView):
                     "image_url": img_url
                 })
 
+            # ✅ thumbnail_image যোগ করা
+            thumbnail_url = None
+            if hasattr(v, 'thumbnail_image') and v.thumbnail_image:
+                try:
+                    thumbnail_url = request.build_absolute_uri(v.thumbnail_image.url)
+                except Exception:
+                    thumbnail_url = None
+
             vendor_list.append({
                 "id": v.id,
                 "vendor_name": v.vendor_name or "N/A",
@@ -778,15 +799,14 @@ class NearbyCampaignVendorsAPI(APIView):
                 "activities": v.activities or [],
                 "rating": float(v.rating) if v.rating else 0.0,
                 "review_count": v.review_count or 0,
+                "thumbnail_image": thumbnail_url,
                 "shop_images": v.shop_images or [],
                 "distance_km": round(distance, 2),
                 "location": {"latitude": v.latitude, "longitude": v.longitude},
                 "active_campaigns": campaigns_info,
-                # convenience: list of campaign images (if any)
                 "active_campaign_images": [c.get("image_url") for c in campaigns_info if c.get("image_url")]
             })
 
-        # Distance অনুযায়ী sort
         vendor_list.sort(key=lambda x: x['distance_km'])
 
         return Response({
@@ -795,6 +815,5 @@ class NearbyCampaignVendorsAPI(APIView):
             "total_vendors": len(vendor_list),
             "vendors": vendor_list
         })
-
 
         #
