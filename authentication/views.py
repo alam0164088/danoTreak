@@ -1918,8 +1918,7 @@ def category_nearby_vendors(request, category):  # এখানে category path
         "search_radius_meters": 2000,
         "category": category,
         "total_found": len(nearby_vendors),
-        "vendors": nearby_vendors
-    }, status=200)
+        "vendors": nearby_vendors    }, status=200)
 
 
 

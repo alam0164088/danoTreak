@@ -78,13 +78,7 @@ class User(AbstractUser):
 
     # Referral System
     referral_code = models.CharField(max_length=20, unique=True, blank=True, null=True)
-    referred_by = models.ForeignKey(
-        "self",
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="referrals"
-    )
+    referred_by = models.ForeignKey('self', on_delete=models.SET_NULL, null=True, blank=True, related_name='referred_users')
 
     USERNAME_FIELD = 'email'
     REQUIRED_FIELDS = []
@@ -102,7 +96,7 @@ class User(AbstractUser):
 
     def save(self, *args, **kwargs):
         if not self.referral_code:
-            self.referral_code = self.generate_referral_code()
+            self.referral_code = f"REF{uuid.uuid4().hex[:8].upper()}"
         super().save(*args, **kwargs)
 
     def generate_email_verification_code(self):

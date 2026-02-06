@@ -595,3 +595,53 @@ class CampaignRedemptionReportView(APIView):
             })
 
         return Response({"campaign_report": report}, status=200)
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def my_referral_list(request):
+    """
+    ভেন্ডর ড্যাশবোর্ড — আমার রেফারেল কোড ব্যবহার করে কারা একাউন্ট খুলেছে তাদের লিস্ট।
+    """
+    user = request.user
+
+    # নিজের referral code
+    my_code = user.referral_code
+    if not my_code:
+        return Response({
+            "success": False,
+            "message": "আপনার কোনো রেফারেল কোড নেই।"
+        }, status=400)
+
+    # যারা আমার referral code ব্যবহার করে একাউন্ট খুলেছে
+    referred_users = User.objects.filter(referred_by=user).order_by('-created_at')
+
+    referred_list = []
+    for ru in referred_users:
+        # এই referred user কি এই vendor এর দোকানে visit করেছে?
+        vendor = getattr(request.user, "vendor_profile", None)
+        total_visits = 0
+        total_spent = None
+
+        if vendor:
+            total_visits = Visit.objects.filter(
+                visitor__user=ru,
+                vendor=vendor
+            ).count()
+
+        referred_list.append({
+            "user_id": ru.id,
+            "full_name": ru.full_name or "N/A",
+            "email": ru.email,
+            "phone": getattr(ru, 'phone', None) or "N/A",
+            "joined_at": ru.created_at.strftime("%d %b %Y, %I:%M %p") if hasattr(ru, 'created_at') and ru.created_at else "N/A",
+            "role": ru.role,
+            "is_active": ru.is_active,
+            "visits_to_my_shop": total_visits,
+        })
+
+    return Response({
+        "success": True,
+        "my_referral_code": my_code,
+        "total_referred": len(referred_list),
+        "referred_users": referred_list
+    }, status=200)
