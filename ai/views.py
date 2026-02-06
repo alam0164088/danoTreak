@@ -140,6 +140,7 @@ class AIThrottle(UserRateThrottle):
 class CategoryNearbyAI(APIView):
     permission_classes = [IsUser]
     throttle_classes = [AIThrottle]
+    # ✅ "itinerary" এখানে যোগ করা হয়েছে
     ALLOWED_CATEGORIES = ["place", "restaurant", "beverage", "lodging", "activities", "itinerary"]
 
     def post(self, request):
@@ -148,7 +149,7 @@ class CategoryNearbyAI(APIView):
             return Response({"success": False, "message": "Location not found. Please update your profile."}, status=400)
 
         category = request.data.get("category", "").lower().strip()
-        user_input = request.data.get("user_input", "")
+        user_input = request.data.get("user_input", "") # Itinerary এর জন্য ইউজার ইনপুট (যেমন: দিন সংখ্যা)
 
         if category not in self.ALLOWED_CATEGORIES:
             return Response({
@@ -163,25 +164,29 @@ class CategoryNearbyAI(APIView):
             if not is_ai_online():
                 return Response({"success": False, "message": "AI server is offline, please try again later."}, status=503)
             
+            # Payload for Itinerary
             payload = {
                 "category": category,
                 "latitude": user_lat,
                 "longitude": user_lng,
-                "user_input": user_input
+                "user_input": user_input  # "3 days plan" বা এই ধরণের ইনপুট
             }
 
+            # AI Call (endpoint আপনার AI সার্ভারের কনফিগারেশন অনুযায়ী হবে, এখানে ডিফল্ট রাখা হলো)
+            # যদি Itinerary এর জন্য আলাদা endpoint থাকে (যেমন /plan_trip), তবে "/get_location" চেঞ্জ করবেন।
             data, code = call_ai_api("/get_location", payload, request.auth, timeout=120)
 
             if code == 200:
+                # ✅ ডিরেক্ট রেসপন্স (কোনো ফরম্যাটিং ছাড়া)
                 return Response({
                     "success": True,
                     "category": category,
-                    "itinerary_data": data
+                    "itinerary_data": data  # পুরো JSON এখানে চলে যাবে
                 }, status=200)
             else:
                 return Response({
                     "success": False, 
-                    "message": "AI Itinerary জেনারেট করতে ব্যর্থ হয়েছে।",
+                    "message": "AI Itinerary জেনারেট করতে ব্যর্থ হয়েছে।",
                     "error_details": data
                 }, status=code)
 
@@ -202,14 +207,6 @@ class CategoryNearbyAI(APIView):
         for vendor in db_vendors:
             distance = haversine_distance(user_lat, user_lng, vendor.latitude, vendor.longitude)
             if distance <= 5000:
-                # ✅ thumbnail_image বের করা
-                thumbnail_url = None
-                if hasattr(vendor, 'thumbnail_image') and vendor.thumbnail_image:
-                    try:
-                        thumbnail_url = request.build_absolute_uri(vendor.thumbnail_image.url)
-                    except Exception:
-                        thumbnail_url = None
-
                 vendors_list.append({
                     "id": vendor.id,
                     "vendor_name": vendor.vendor_name or "N/A",
@@ -222,7 +219,6 @@ class CategoryNearbyAI(APIView):
                     "activities": vendor.activities or [],
                     "rating": float(vendor.rating) if vendor.rating else 0.0,
                     "review_count": vendor.review_count or 0,
-                    "thumbnail_image": thumbnail_url,
                     "shop_images": vendor.shop_images or [],
                     "distance_meters": round(distance, 1),
                     "location": {"latitude": float(vendor.latitude), "longitude": float(vendor.longitude)},
@@ -231,7 +227,6 @@ class CategoryNearbyAI(APIView):
 
         # ✅ AI vendors
         ai_info = {"status": "skipped"}
-        ai_city_history = None
 
         if is_ai_online():
             try:
@@ -241,13 +236,10 @@ class CategoryNearbyAI(APIView):
                 if code == 200 and data and isinstance(data, dict):
                     ai_items = data.get(CATEGORY_KEY_MAP.get(category, category), [])
                     ai_info = {"status": "success", "count": len(ai_items)}
-                    ai_city_history = data.get("cityHistory") or data.get("city_history")
                     
                     for ai in ai_items:
                         ai_id = ai.get("id") or str(uuid.uuid4())
-                        ai_photos = [p.get("photo_url") for p in ai.get("photos", []) if p.get("photo_url")]
-
-                        ai_payload = {
+                        vendors_list.append({
                             "id": ai_id,
                             "vendor_name": ai.get("name") or "N/A",
                             "shop_name": ai.get("name") or "N/A",
@@ -259,19 +251,14 @@ class CategoryNearbyAI(APIView):
                             "activities": ai.get("features", "").split(", ") if ai.get("features") else [],
                             "rating": float(str(ai.get("rating", "0")).split("/")[0]) if ai.get("rating") else 0.0,
                             "review_count": ai.get("total_reviews", 0),
-                            "thumbnail_image": ai_photos[0] if ai_photos else None,
-                            "shop_images": ai_photos,
+                            "shop_images": [p.get("photo_url") for p in ai.get("photos", []) if p.get("photo_url")],
                             "distance_meters": round(float(ai.get("distance_km", 0)) * 1000, 1),
                             "location": {
                                 "latitude": ai.get("location", {}).get("lat", 0),
                                 "longitude": ai.get("location", {}).get("lng", 0)
                             },
                             "source": "ai"
-                        }
-
-                        _cache_ai_vendor(ai_id, ai_payload)
-
-                        vendors_list.append(ai_payload)
+                        })
                 else:
                     ai_info = {"status": "error", "message": data.get("error", "Unknown")}
             except Exception as e:
@@ -282,18 +269,15 @@ class CategoryNearbyAI(APIView):
         # ✅ Sort
         vendors_list.sort(key=lambda x: (0 if x.get("source") == "db" else 1, x.get("distance_meters", 1e9)))
 
-        response_payload = {
+        return Response({
             "success": True,
             "your_location": {"lat": user_lat, "lng": user_lng},
             "search_radius_meters": 5000,
             "category": category,
             "total_found": len(vendors_list),
-            **({"cityHistory": ai_city_history} if category == "place" and ai_city_history else {}),
             "vendors": vendors_list,
             "ai_server": ai_info
-        }
-
-        return Response(response_payload, status=200)
+        }, status=200)
 
 
 # ===============================
@@ -583,13 +567,6 @@ def get_vendor_info(fav):
         v = fav.vendor
         if not v.latitude or not v.longitude:
             return None
-        # ✅ thumbnail_image বের করা
-        thumbnail_url = None
-        if hasattr(v, 'thumbnail_image') and v.thumbnail_image:
-            try:
-                thumbnail_url = v.thumbnail_image.url
-            except Exception:
-                thumbnail_url = None
         return {
             "id": str(v.id),
             "shop_name": v.shop_name or "name not available",
@@ -597,9 +574,7 @@ def get_vendor_info(fav):
             "category": getattr(v, 'category', 'unknown'),
             "rating": float(v.rating) if v.rating else 0.0,
             "review_count": getattr(v, 'review_count', 0),
-            "thumbnail_image": thumbnail_url,
             "shop_image": v.shop_images[0] if v.shop_images else None,
-            "shop_images": v.shop_images or [],
             "phone": v.phone_number or "phone not available",
             "latitude": float(v.latitude),
             "longitude": float(v.longitude),
@@ -607,14 +582,11 @@ def get_vendor_info(fav):
             "has_full_data": True
         }
     elif fav.ai_vendor_id and fav.ai_vendor_data:
-        data = fav.ai_vendor_data or {}
-        location = data.get("location", {}) or {}
-        lat = location.get("latitude") or location.get("lat") or data.get("latitude") or data.get("lat")
-        lng = location.get("longitude") or location.get("lng") or data.get("longitude") or data.get("lng")
+        data = fav.ai_vendor_data
+        location = data.get("location", {})
+        lat, lng = location.get("latitude"), location.get("longitude")
         if lat is None or lng is None:
             return None
-        ai_images = data.get("shop_images", [])
-        thumb = data.get("thumbnail_image") or (ai_images[0] if ai_images else None)
         return {
             "id": fav.ai_vendor_id,
             "shop_name": data.get("shop_name", "AI shop"),
@@ -622,9 +594,7 @@ def get_vendor_info(fav):
             "category": data.get("category", "place"),
             "rating": data.get("rating", 0.0),
             "review_count": data.get("review_count", 0),
-            "thumbnail_image": thumb,
-            "shop_image": ai_images[0] if ai_images else None,
-            "shop_images": ai_images,
+            "shop_image": data.get("shop_images", [None])[0],
             "phone": data.get("phone_number", "phone not available"),
             "latitude": float(lat),
             "longitude": float(lng),
@@ -642,15 +612,12 @@ class ToggleFavoriteVendor(APIView):
             return Response({"success": False, "message": "vendor_id required"}, status=400)
 
         user = request.user
-
-        # ✅ AI detect: flag/data/source/UUID
-        is_ai = bool(request.data.get("is_ai_vendor")) or bool(request.data.get("ai_vendor_data")) or request.data.get("source") == "ai"
-        if not is_ai:
-            try:
-                UUID(str(vendor_id))
-                is_ai = True
-            except ValueError:
-                is_ai = False
+        # AI vendor check
+        try:
+            UUID(str(vendor_id))
+            is_ai = True
+        except ValueError:
+            is_ai = False
 
         if is_ai:
             favorite = FavoriteVendor.objects.filter(user=user, ai_vendor_id=str(vendor_id)).first()
@@ -659,20 +626,7 @@ class ToggleFavoriteVendor(APIView):
                 favorite.delete()
                 return Response({"success": True, "message": "Removed from favorites", "is_favorite": False, "vendor": vendor_data})
 
-            ai_data = request.data.get("ai_vendor_data") or request.data.get("vendor") or {}
-            if not ai_data:
-                ai_data = cache.get(f"ai_vendor:{vendor_id}") or {}
-
-            loc = ai_data.get("location") or {}
-            lat = loc.get("latitude") or loc.get("lat") or ai_data.get("latitude") or ai_data.get("lat")
-            lng = loc.get("longitude") or loc.get("lng") or ai_data.get("longitude") or ai_data.get("lng")
-            if lat is None or lng is None:
-                return Response({"success": False, "message": "ai_vendor_data not found in cache"}, status=400)
-
-            ai_data["location"] = {"latitude": float(lat), "longitude": float(lng)}
-            ai_data.setdefault("shop_images", [])
-            ai_data.setdefault("thumbnail_image", ai_data["shop_images"][0] if ai_data["shop_images"] else None)
-
+            ai_data = request.data.get("ai_vendor_data", {})
             favorite = FavoriteVendor.objects.create(
                 user=user,
                 ai_vendor_id=str(vendor_id),
@@ -680,20 +634,20 @@ class ToggleFavoriteVendor(APIView):
                 ai_vendor_data=ai_data
             )
             return Response({"success": True, "message": "Added to favorites (for 7 days)", "is_favorite": True, "vendor": ai_data})
+        else:
+            try:
+                vendor = Vendor.objects.get(id=vendor_id)
+            except Vendor.DoesNotExist:
+                return Response({"success": False, "message": "Vendor not found"}, status=404)
 
-        try:
-            vendor = Vendor.objects.get(id=vendor_id)
-        except Vendor.DoesNotExist:
-            return Response({"success": False, "message": "Vendor not found"}, status=404)
+            favorite = FavoriteVendor.objects.filter(user=user, vendor=vendor).first()
+            if favorite:
+                favorite.delete()
+                return Response({"success": True, "message": "Removed from favorites", "is_favorite": False, "vendor": None})
 
-        favorite = FavoriteVendor.objects.filter(user=user, vendor=vendor).first()
-        if favorite:
-            favorite.delete()
-            return Response({"success": True, "message": "Removed from favorites", "is_favorite": False, "vendor": None})
-
-        favorite = FavoriteVendor.objects.create(user=user, vendor=vendor)
-        vendor_data = get_vendor_info(favorite)  # fresh instance
-        return Response({"success": True, "message": "Added to favorites", "is_favorite": True, "vendor": vendor_data})
+            favorite = FavoriteVendor.objects.create(user=user, vendor=vendor)
+            vendor_data = get_vendor_info(favorite)  # fresh instance
+            return Response({"success": True, "message": "Added to favorites", "is_favorite": True, "vendor": vendor_data})
         
         
 # My Favorite Vendors
@@ -760,13 +714,14 @@ class NearbyCampaignVendorsAPI(APIView):
             return Response({"success": False, "message": "Your profile does not have location information. Please update it."}, status=400)
         
         user_lat, user_lng = profile.latitude, profile.longitude
-        max_distance_km = 5
+        max_distance_km = 5  # প্রয়োজনমতো পরিবর্তন করা যাবে
 
+        # Active campaign vendors
         vendors = Vendor.objects.filter(
-            campaigns__is_active=True,
+            campaigns__is_active=True,  # Campaign relation থেকে filter
             latitude__isnull=False,
             longitude__isnull=False
-        ).distinct()
+        ).distinct()  # Duplicate vendors দূর করার জন্য
 
         vendor_list = []
 
@@ -775,39 +730,17 @@ class NearbyCampaignVendorsAPI(APIView):
             if distance > max_distance_km:
                 continue
 
+            # Active campaigns নিয়ে আসা
             active_campaigns = v.campaigns.filter(is_active=True)
-            campaigns_info = []
-            for c in active_campaigns:
-                img_url = None
-                try:
-                    if getattr(c, "image", None):
-                        img_field = c.image
-                        if hasattr(img_field, "url"):
-                            img_url = request.build_absolute_uri(img_field.url)
-                        else:
-                            img_url = str(img_field)
-                    elif getattr(c, "image_url", None):
-                        raw = c.image_url
-                        img_url = request.build_absolute_uri(raw) if not str(raw).startswith("http") else raw
-                except Exception:
-                    img_url = None
-
-                campaigns_info.append({
+            campaigns_info = [
+                {
                     "name": c.name,
                     "reward_name": c.reward_name,
                     "reward_description": c.reward_description,
                     "required_visits": c.required_visits,
-                    "campaign_id": c.id,
-                    "image_url": img_url
-                })
-
-            # ✅ thumbnail_image যোগ করা
-            thumbnail_url = None
-            if hasattr(v, 'thumbnail_image') and v.thumbnail_image:
-                try:
-                    thumbnail_url = request.build_absolute_uri(v.thumbnail_image.url)
-                except Exception:
-                    thumbnail_url = None
+                    "campaign_id": c.id
+                } for c in active_campaigns
+            ]
 
             vendor_list.append({
                 "id": v.id,
@@ -821,14 +754,13 @@ class NearbyCampaignVendorsAPI(APIView):
                 "activities": v.activities or [],
                 "rating": float(v.rating) if v.rating else 0.0,
                 "review_count": v.review_count or 0,
-                "thumbnail_image": thumbnail_url,
                 "shop_images": v.shop_images or [],
                 "distance_km": round(distance, 2),
                 "location": {"latitude": v.latitude, "longitude": v.longitude},
-                "active_campaigns": campaigns_info,
-                "active_campaign_images": [c.get("image_url") for c in campaigns_info if c.get("image_url")]
+                "active_campaigns": campaigns_info
             })
 
+        # Distance অনুযায়ী sort
         vendor_list.sort(key=lambda x: x['distance_km'])
 
         return Response({
@@ -837,5 +769,6 @@ class NearbyCampaignVendorsAPI(APIView):
             "total_vendors": len(vendor_list),
             "vendors": vendor_list
         })
+
 
         #
