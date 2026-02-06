@@ -732,15 +732,31 @@ class NearbyCampaignVendorsAPI(APIView):
 
             # Active campaigns নিয়ে আসা
             active_campaigns = v.campaigns.filter(is_active=True)
-            campaigns_info = [
-                {
+            campaigns_info = []
+            for c in active_campaigns:
+                # build absolute image url if present
+                img_url = None
+                try:
+                    if getattr(c, "image", None):
+                        img_field = c.image
+                        if hasattr(img_field, "url"):
+                            img_url = request.build_absolute_uri(img_field.url)
+                        else:
+                            img_url = str(img_field)
+                    elif getattr(c, "image_url", None):
+                        raw = c.image_url
+                        img_url = request.build_absolute_uri(raw) if not str(raw).startswith("http") else raw
+                except Exception:
+                    img_url = None
+
+                campaigns_info.append({
                     "name": c.name,
                     "reward_name": c.reward_name,
                     "reward_description": c.reward_description,
                     "required_visits": c.required_visits,
-                    "campaign_id": c.id
-                } for c in active_campaigns
-            ]
+                    "campaign_id": c.id,
+                    "image_url": img_url
+                })
 
             vendor_list.append({
                 "id": v.id,
@@ -757,7 +773,9 @@ class NearbyCampaignVendorsAPI(APIView):
                 "shop_images": v.shop_images or [],
                 "distance_km": round(distance, 2),
                 "location": {"latitude": v.latitude, "longitude": v.longitude},
-                "active_campaigns": campaigns_info
+                "active_campaigns": campaigns_info,
+                # convenience: list of campaign images (if any)
+                "active_campaign_images": [c.get("image_url") for c in campaigns_info if c.get("image_url")]
             })
 
         # Distance অনুযায়ী sort
