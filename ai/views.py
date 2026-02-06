@@ -245,9 +245,9 @@ class CategoryNearbyAI(APIView):
                     
                     for ai in ai_items:
                         ai_id = ai.get("id") or str(uuid.uuid4())
-                        # ✅ AI vendor এর জন্যও thumbnail_image (প্রথম ফটো)
                         ai_photos = [p.get("photo_url") for p in ai.get("photos", []) if p.get("photo_url")]
-                        vendors_list.append({
+
+                        ai_payload = {
                             "id": ai_id,
                             "vendor_name": ai.get("name") or "N/A",
                             "shop_name": ai.get("name") or "N/A",
@@ -267,7 +267,11 @@ class CategoryNearbyAI(APIView):
                                 "longitude": ai.get("location", {}).get("lng", 0)
                             },
                             "source": "ai"
-                        })
+                        }
+
+                        _cache_ai_vendor(ai_id, ai_payload)
+
+                        vendors_list.append(ai_payload)
                 else:
                     ai_info = {"status": "error", "message": data.get("error", "Unknown")}
             except Exception as e:
@@ -603,12 +607,14 @@ def get_vendor_info(fav):
             "has_full_data": True
         }
     elif fav.ai_vendor_id and fav.ai_vendor_data:
-        data = fav.ai_vendor_data
-        location = data.get("location", {})
-        lat, lng = location.get("latitude"), location.get("longitude")
+        data = fav.ai_vendor_data or {}
+        location = data.get("location", {}) or {}
+        lat = location.get("latitude") or location.get("lat") or data.get("latitude") or data.get("lat")
+        lng = location.get("longitude") or location.get("lng") or data.get("longitude") or data.get("lng")
         if lat is None or lng is None:
             return None
         ai_images = data.get("shop_images", [])
+        thumb = data.get("thumbnail_image") or (ai_images[0] if ai_images else None)
         return {
             "id": fav.ai_vendor_id,
             "shop_name": data.get("shop_name", "AI shop"),
@@ -616,7 +622,7 @@ def get_vendor_info(fav):
             "category": data.get("category", "place"),
             "rating": data.get("rating", 0.0),
             "review_count": data.get("review_count", 0),
-            "thumbnail_image": ai_images[0] if ai_images else None,
+            "thumbnail_image": thumb,
             "shop_image": ai_images[0] if ai_images else None,
             "shop_images": ai_images,
             "phone": data.get("phone_number", "phone not available"),
@@ -636,12 +642,15 @@ class ToggleFavoriteVendor(APIView):
             return Response({"success": False, "message": "vendor_id required"}, status=400)
 
         user = request.user
-        # AI vendor check
-        try:
-            UUID(str(vendor_id))
-            is_ai = True
-        except ValueError:
-            is_ai = False
+
+        # ✅ AI detect: flag/data/source/UUID
+        is_ai = bool(request.data.get("is_ai_vendor")) or bool(request.data.get("ai_vendor_data")) or request.data.get("source") == "ai"
+        if not is_ai:
+            try:
+                UUID(str(vendor_id))
+                is_ai = True
+            except ValueError:
+                is_ai = False
 
         if is_ai:
             favorite = FavoriteVendor.objects.filter(user=user, ai_vendor_id=str(vendor_id)).first()
@@ -650,7 +659,20 @@ class ToggleFavoriteVendor(APIView):
                 favorite.delete()
                 return Response({"success": True, "message": "Removed from favorites", "is_favorite": False, "vendor": vendor_data})
 
-            ai_data = request.data.get("ai_vendor_data", {})
+            ai_data = request.data.get("ai_vendor_data") or request.data.get("vendor") or {}
+            if not ai_data:
+                ai_data = cache.get(f"ai_vendor:{vendor_id}") or {}
+
+            loc = ai_data.get("location") or {}
+            lat = loc.get("latitude") or loc.get("lat") or ai_data.get("latitude") or ai_data.get("lat")
+            lng = loc.get("longitude") or loc.get("lng") or ai_data.get("longitude") or ai_data.get("lng")
+            if lat is None or lng is None:
+                return Response({"success": False, "message": "ai_vendor_data not found in cache"}, status=400)
+
+            ai_data["location"] = {"latitude": float(lat), "longitude": float(lng)}
+            ai_data.setdefault("shop_images", [])
+            ai_data.setdefault("thumbnail_image", ai_data["shop_images"][0] if ai_data["shop_images"] else None)
+
             favorite = FavoriteVendor.objects.create(
                 user=user,
                 ai_vendor_id=str(vendor_id),
@@ -658,20 +680,20 @@ class ToggleFavoriteVendor(APIView):
                 ai_vendor_data=ai_data
             )
             return Response({"success": True, "message": "Added to favorites (for 7 days)", "is_favorite": True, "vendor": ai_data})
-        else:
-            try:
-                vendor = Vendor.objects.get(id=vendor_id)
-            except Vendor.DoesNotExist:
-                return Response({"success": False, "message": "Vendor not found"}, status=404)
 
-            favorite = FavoriteVendor.objects.filter(user=user, vendor=vendor).first()
-            if favorite:
-                favorite.delete()
-                return Response({"success": True, "message": "Removed from favorites", "is_favorite": False, "vendor": None})
+        try:
+            vendor = Vendor.objects.get(id=vendor_id)
+        except Vendor.DoesNotExist:
+            return Response({"success": False, "message": "Vendor not found"}, status=404)
 
-            favorite = FavoriteVendor.objects.create(user=user, vendor=vendor)
-            vendor_data = get_vendor_info(favorite)  # fresh instance
-            return Response({"success": True, "message": "Added to favorites", "is_favorite": True, "vendor": vendor_data})
+        favorite = FavoriteVendor.objects.filter(user=user, vendor=vendor).first()
+        if favorite:
+            favorite.delete()
+            return Response({"success": True, "message": "Removed from favorites", "is_favorite": False, "vendor": None})
+
+        favorite = FavoriteVendor.objects.create(user=user, vendor=vendor)
+        vendor_data = get_vendor_info(favorite)  # fresh instance
+        return Response({"success": True, "message": "Added to favorites", "is_favorite": True, "vendor": vendor_data})
         
         
 # My Favorite Vendors
